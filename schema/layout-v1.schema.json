@@ -1,0 +1,350 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/panel86/schema/layout-v1.schema.json",
+  "title": "Panel 86 layout, версия 1",
+  "description": "Раскладка одной панели. Лежит в LittleFS, редактируется в браузере, применяется без пересборки прошивки. Из этого же файла UI-VM выводит список подписок на сущности Home Assistant — отдельно их описывать не нужно.",
+  "type": "object",
+  "required": [
+    "schema",
+    "pages"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "const": "panel86/1"
+    },
+    "room": {
+      "type": "string",
+      "description": "area_id комнаты, в которой висит панель. Определяет заголовок и контекст по умолчанию."
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Растёт при каждом сохранении. Панель отклоняет раскладку с revision меньше текущей."
+    },
+    "theme": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "accent": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        },
+        "scheme": {
+          "enum": [
+            "light",
+            "dark",
+            "auto"
+          ],
+          "default": "auto",
+          "description": "auto — переключение по датчику освещённости."
+        },
+        "density": {
+          "enum": [
+            "compact",
+            "comfortable"
+          ],
+          "default": "comfortable"
+        },
+        "radius": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 48,
+          "default": 16
+        }
+      }
+    },
+    "pages": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+        "$ref": "#/$defs/page"
+      }
+    },
+    "screensaver": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "type": "string",
+          "pattern": "^[0-9]+(s|min)$",
+          "default": "60s"
+        },
+        "type": {
+          "enum": [
+            "clock",
+            "clock_weather",
+            "photo",
+            "blank"
+          ],
+          "default": "clock_weather"
+        },
+        "brightness": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 12
+        },
+        "wake": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "touch",
+              "presence",
+              "button"
+            ]
+          },
+          "default": [
+            "touch"
+          ]
+        },
+        "weather_entity": {
+          "type": "string"
+        },
+        "temperature_entity": {
+          "type": "string"
+        }
+      }
+    },
+    "defaults": {
+      "type": "object",
+      "description": "Значения по умолчанию для всех карточек страницы. Перебиваются настройкой на самой карточке.",
+      "additionalProperties": false,
+      "properties": {
+        "throttle": {
+          "type": "string",
+          "pattern": "^[0-9]+(ms|s)$",
+          "default": "1s"
+        },
+        "deadband_percent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 0.5,
+          "description": "Дедбенд в процентах от текущего значения — для датчиков, где абсолютный порог задавать неудобно."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "page": {
+      "type": "object",
+      "required": [
+        "id",
+        "cards"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9_]{1,24}$"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 24
+        },
+        "icon": {
+          "type": "string"
+        },
+        "grid": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "default": [
+            2,
+            4
+          ],
+          "description": "[колонки, строки]. На 720x720 больше 2x4 нечитаемо пальцем."
+        },
+        "hidden": {
+          "type": "boolean",
+          "default": false
+        },
+        "cards": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/card"
+          }
+        }
+      }
+    },
+    "card": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "light",
+            "switch",
+            "climate",
+            "cover",
+            "valve",
+            "scene",
+            "script",
+            "sensor",
+            "media",
+            "camera",
+            "lock",
+            "relay",
+            "room_grid",
+            "spacer"
+          ],
+          "description": "Каталог намеренно закрытый. Одиннадцатый тип добавляется, когда трое попросят, а не когда одному захотелось."
+        },
+        "entity": {
+          "type": "string",
+          "pattern": "^[a-z_]+\\.[a-z0-9_]+$",
+          "description": "entity_id в Home Assistant. Не нужен для relay, room_grid и spacer."
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 20,
+          "description": "Если не задан — берётся friendly_name из HA."
+        },
+        "icon": {
+          "type": "string"
+        },
+        "span": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "default": [
+            1,
+            1
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "relay"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "target"
+            ],
+            "properties": {
+              "target": {
+                "enum": [
+                  "relay_1",
+                  "relay_2"
+                ]
+              },
+              "local_fallback": {
+                "type": "boolean",
+                "default": true,
+                "description": "Касание переключает реле напрямую, минуя Home Assistant. Работает при мёртвом сервере и мёртвой сети. Отключать только осознанно."
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "sensor"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "unit": {
+                "type": "string",
+                "maxLength": 8
+              },
+              "decimals": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 3,
+                "default": 1
+              },
+              "warn_above": {
+                "type": "number"
+              },
+              "warn_below": {
+                "type": "number"
+              },
+              "graph": {
+                "type": "boolean",
+                "default": false,
+                "description": "Спарклайн за сутки. Требует запроса истории — дороже обычной подписки."
+              },
+              "deadband": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Не перерисовывать, пока значение не изменилось хотя бы на столько. Спасает от шума АЦП: замерено, что датчик напряжения шлёт обновление раз в 1,6 с, и 88 % изменений меньше 0,5 В. Без дедбенда карточка дёргается вечно и не даёт экрану уснуть."
+              },
+              "throttle": {
+                "type": "string",
+                "pattern": "^[0-9]+(ms|s)$",
+                "default": "1s",
+                "description": "Минимальный интервал между перерисовками карточки. Последнее значение всё равно дойдёт — просто не сразу."
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "camera"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "refresh": {
+                "type": "string",
+                "pattern": "^[0-9]+(s|min)$",
+                "default": "10s",
+                "description": "Снимки, не поток. JPEG раскодирует аппаратный блок P4."
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "room_grid"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "areas"
+            ],
+            "properties": {
+              "areas": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 12,
+                "description": "Список area_id. Плитка комнат с переходом внутрь."
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

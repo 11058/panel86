@@ -1,0 +1,107 @@
+# ---------------------------------------------------------------------------
+# Waveshare ESP32-P4-86-Panel-ETH-2RO / ESP32-P4-WIFI6-Touch-LCD-4B
+# Железо: пины и периферия. Этот файл описывает плату и почти не меняется.
+#
+# Пины сверены с рабочим конфигом chrisdunnname/esphome-p4-86-panel-eth-2ro-lvgl
+# и wiki Waveshare. Всё, что помечено (wiki) — из документации, на живой плате
+# ещё не проверялось.
+# ---------------------------------------------------------------------------
+
+esp32:
+  board: esp32-p4-evboard
+  engineering_sample: true
+  flash_size: 32MB
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM: "y"
+      CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC: "y"
+      CONFIG_MBEDTLS_SSL_PROTO_TLS1_3: "y"
+      CONFIG_SPIRAM_USE_MALLOC: "y"
+    advanced:
+      execute_from_psram: true
+      enable_idf_experimental_features: true
+
+psram:
+  speed: 200MHz
+
+# Без этого LDO не поднимется PHY MIPI-DSI и экран останется чёрным.
+esp_ldo:
+  - channel: 3
+    voltage: 2.5V
+
+i2c:
+  id: i2c_bus
+  sda: GPIO7
+  scl: GPIO8
+  frequency: 400kHz
+  scan: true
+
+display:
+  - platform: mipi_dsi
+    id: lcd
+    model: WAVESHARE-P4-86-PANEL   # 720x720, пресет уже есть в ESPHome
+
+touchscreen:
+  - platform: gt911
+    id: touch
+    i2c_id: i2c_bus
+    setup_priority: -200           # после дисплея, иначе не инициализируется
+
+# Подсветка. inverted: true — так на этой плате.
+# max_power ограничен намеренно: в закрытом подрозетнике 100 % яркости греет.
+output:
+  - platform: ledc
+    id: backlight_pwm
+    pin: GPIO26
+    frequency: 100Hz
+    inverted: true
+    min_power: 0.0
+    max_power: 0.8
+
+light:
+  - platform: monochromatic
+    id: backlight
+    output: backlight_pwm
+    name: "Подсветка"
+    restore_mode: ALWAYS_ON
+    default_transition_length: 400ms
+
+# --- Реле (только у варианта 2RO). Пины из wiki, на плате не проверены. ---
+switch:
+  - platform: gpio
+    id: relay_1
+    pin: GPIO32
+    name: "Реле 1"
+    restore_mode: RESTORE_DEFAULT_OFF
+  - platform: gpio
+    id: relay_2
+    pin: GPIO46
+    name: "Реле 2"
+    restore_mode: RESTORE_DEFAULT_OFF
+
+# --- Боковая кнопка. Аппаратный путь отхода, когда UI завис. ---
+binary_sensor:
+  - platform: gpio
+    id: side_button
+    pin:
+      number: GPIO35
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+    name: "Боковая кнопка"
+    on_multi_click:
+      - timing: [ON for at most 1s, OFF for at least 0.3s]
+        then:
+          - light.toggle: backlight
+      - timing: [ON for at least 4s]
+        then:
+          - logger.log: "Удержание кнопки — перезагрузка"
+          - button.press: btn_restart
+
+button:
+  - platform: restart
+    id: btn_restart
+    name: "Перезагрузка"
+    entity_category: diagnostic

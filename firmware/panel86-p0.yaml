@@ -1,0 +1,189 @@
+# ===========================================================================
+# P0 — «Живое железо и цифры».
+#
+# Цель фазы НЕ красивый интерфейс, а измерения: сколько кадров тянет LVGL на
+# 720x720, сколько остаётся памяти, сколько держится время цикла и насколько
+# плата греется в закрытом подрозетнике. Эти числа — опорная точка на весь
+# проект. Никакого своего кода здесь нет и быть не должно.
+#
+# ВНИМАНИЕ: конфиг ещё ни разу не компилировался. Первое, что делать:
+#     esphome config firmware/panel86-p0.yaml
+# и чинить то, что вылезет. См. docs/01-p0-bringup.md
+# ===========================================================================
+
+substitutions:
+  name: panel86-p0
+  friendly_name: "Панель 86 · P0"
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  min_version: 2026.7.0
+  on_boot:
+    - priority: -100
+      then:
+        - logger.log: "P0 загрузился"
+
+packages:
+  board: !include packages/board.yaml
+  net:   !include packages/net-ethernet.yaml   # заменить на net-wifi.yaml для теста Wi-Fi
+
+logger:
+  hardware_uart: UART0
+  level: INFO
+
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+time:
+  - platform: homeassistant
+    id: ha_time
+
+# --------------------------------------------------------------------------
+# Приборы. Ради этого вся фаза и существует.
+# --------------------------------------------------------------------------
+debug:
+  update_interval: 10s
+
+sensor:
+  - platform: debug
+    free:
+      name: "Свободная куча"
+      entity_category: diagnostic
+    loop_time:
+      name: "Время цикла"
+      entity_category: diagnostic
+    psram:
+      name: "Свободный PSRAM"
+      entity_category: diagnostic
+
+  - platform: internal_temperature
+    name: "Температура SoC"
+    entity_category: diagnostic
+    update_interval: 30s
+
+  - platform: uptime
+    name: "Время работы"
+    entity_category: diagnostic
+
+  - platform: template
+    id: bench_fps
+    name: "Бенчмарк, к/с"
+    unit_of_measurement: "fps"
+    accuracy_decimals: 1
+    entity_category: diagnostic
+
+text_sensor:
+  - platform: debug
+    device:
+      name: "Устройство"
+    reset_reason:
+      name: "Причина перезагрузки"
+
+globals:
+  - id: t_bench
+    type: uint32_t
+    restore_value: false
+    initial_value: "0"
+
+# --------------------------------------------------------------------------
+# Бенчмарк отрисовки.
+# Гоняем N полных перерисовок экрана, делим на затраченное время.
+# Число грубое, но сравнимое между настройками — а нужно именно сравнение:
+# 16 бит против 24, с ускорением PPA и без, при разной доле буфера.
+# --------------------------------------------------------------------------
+script:
+  - id: bench_redraw
+    mode: single
+    then:
+      - logger.log: "БЕНЧМАРК: старт"
+      - lambda: 'id(t_bench) = millis();'
+      - repeat:
+          count: 120
+          then:
+            - lvgl.widget.redraw:
+            - delay: 1ms
+      - lambda: |-
+          uint32_t dt = millis() - id(t_bench);
+          float fps = dt ? 120000.0f / (float) dt : 0.0f;
+          ESP_LOGI("bench", "120 перерисовок за %u мс -> %.1f к/с", dt, fps);
+          id(bench_fps).publish_state(fps);
+
+button:
+  - platform: template
+    name: "Запустить бенчмарк"
+    entity_category: diagnostic
+    on_press:
+      - script.execute: bench_redraw
+
+# --------------------------------------------------------------------------
+# Минимальный интерфейс: показать, что экран и тач живые, и дать чем нагрузить.
+# --------------------------------------------------------------------------
+lvgl:
+  displays: [lcd]
+  touchscreens: [touch]
+  buffer_size: 25%
+  pages:
+    - id: page_p0
+      widgets:
+        - label:
+            id: lbl_title
+            text: "P0 · живое железо"
+            align: TOP_MID
+            y: 24
+            text_font: montserrat_28
+        - label:
+            id: lbl_touch
+            text: "коснитесь экрана"
+            align: CENTER
+            y: -60
+            text_font: montserrat_20
+        - button:
+            id: btn_bench
+            align: CENTER
+            y: 20
+            width: 320
+            height: 80
+            widgets:
+              - label:
+                  text: "Бенчмарк"
+                  align: CENTER
+            on_click:
+              - script.execute: bench_redraw
+        - button:
+            id: btn_relay
+            align: CENTER
+            y: 130
+            width: 320
+            height: 80
+            widgets:
+              - label:
+                  text: "Реле 1"
+                  align: CENTER
+            on_click:
+              # Локальный фолбэк: реле щёлкает прямо здесь, без участия HA.
+              # Это надо проверить в P0, выдернув сетевой кабель.
+              - switch.toggle: relay_1
+        - label:
+            id: lbl_stat
+            align: BOTTOM_MID
+            y: -24
+            text: "—"
+            text_font: montserrat_16
+
+interval:
+  - interval: 2s
+    then:
+      - lvgl.label.update:
+          id: lbl_stat
+          text: !lambda |-
+            char buf[96];
+            snprintf(buf, sizeof(buf), "куча %u КиБ · psram %u КиБ",
+                     (unsigned)(esp_get_free_heap_size() / 1024),
+                     (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
+            return {buf};

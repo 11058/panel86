@@ -1,0 +1,15 @@
+# секреты — никогда в репозиторий
+firmware/secrets.yaml
+.esphome/
+*.pem
+.env
+
+# сборка
+build/
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+
+# локальное
+.DS_Store

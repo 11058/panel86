@@ -1,0 +1,58 @@
+{
+  "schema": "panel86/1",
+  "room": "gostinaia",
+  "revision": 1,
+
+  "theme": { "accent": "#C2610C", "scheme": "auto", "density": "comfortable", "radius": 16 },
+
+  "pages": [
+    {
+      "id": "home",
+      "title": "Гостиная",
+      "grid": [2, 4],
+      "cards": [
+        { "type": "light",   "entity": "light.esp8266sw1_relay_1", "label": "Люстра" },
+        { "type": "light",   "entity": "light.esp8266sw1_relay_2", "label": "Бра" },
+        { "type": "climate", "entity": "climate.iug_lugovaia_12_gostinaia_2",
+                             "label": "Отопление", "span": [2, 1] },
+        { "type": "sensor",  "entity": "sensor.iug_lugovaia_12_gostinaia_2",
+                             "label": "Температура", "unit": "°C", "decimals": 1, "graph": true },
+        { "type": "sensor",  "entity": "sensor.kca16homemcu1_smoke_ch1_status",
+                             "label": "Дым", "decimals": 0 },
+        { "type": "media",   "entity": "media_player.yandex_station_r1040430044cwt",
+                             "label": "Станция", "span": [2, 1] }
+      ]
+    },
+    {
+      "id": "media",
+      "title": "Медиа",
+      "grid": [2, 4],
+      "cards": [
+        { "type": "media", "entity": "media_player.samsung_7_series_43_ue43ru7170uxru",
+                           "label": "Телевизор", "span": [2, 2] },
+        { "type": "media", "entity": "media_player.yandex_station_r1040430044cwt",
+                           "label": "Станция", "span": [2, 2] }
+      ]
+    },
+    {
+      "id": "house",
+      "title": "Дом",
+      "grid": [2, 4],
+      "cards": [
+        { "type": "room_grid",
+          "areas": ["gostinaia", "spalnia", "prikhozhaia", "sanuzel", "kabinet",
+                    "veranda", "dvor", "ogorod", "bania", "gostevoi_dom"],
+          "span": [2, 4] }
+      ]
+    }
+  ],
+
+  "screensaver": {
+    "after": "60s",
+    "type": "clock_weather",
+    "brightness": 12,
+    "wake": ["touch", "presence"],
+    "weather_entity": "weather.home",
+    "temperature_entity": "sensor.iug_lugovaia_12_gostinaia_2"
+  }
+}
