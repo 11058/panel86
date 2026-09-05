@@ -33,11 +33,23 @@ esphome:
         # попадают в список раньше страниц основного конфига, и без этого
         # стартовой оказывается page_wifi_list. Опции «начальная страница»
         # в ESPHome нет.
+        # Контейнер для интерпретатора: задаём один раз при загрузке,
+        # чтобы заливка раскладки по HTTP сразу перестраивала экран.
+        - lambda: 'id(panel_storage)->set_root(id(ui_root));'
         - if:
             condition:
               lambda: 'return wifi::global_wifi_component->has_sta();'
             then:
-              - lvgl.page.show: page_p0
+              # Сеть настроена: если раскладка есть — показываем её,
+              # если нет — служебный экран P0.
+              - if:
+                  condition:
+                    lambda: 'return id(panel_storage)->rebuild();'
+                  then:
+                    - logger.log: "Раскладка построена, показываю её"
+                    - lvgl.page.show: page_layout
+                  else:
+                    - lvgl.page.show: page_p0
             else:
               - logger.log: "Сеть не настроена — открываю настройку Wi-Fi"
               - lvgl.page.show: page_wifi_list

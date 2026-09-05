@@ -19,7 +19,7 @@ from esphome.components.esp32 import add_idf_component, require_vfs_dir
 from esphome.const import CONF_ID
 
 CODEOWNERS = ["@11058"]
-DEPENDENCIES = ["esp32", "json"]
+DEPENDENCIES = ["esp32", "json", "network"]
 AUTO_LOAD = ["json"]
 
 panel_ui_ns = cg.esphome_ns.namespace("panel_ui")
@@ -28,6 +28,7 @@ PanelUI = panel_ui_ns.class_("PanelUI", cg.Component)
 CONF_PARTITION = "partition"
 CONF_BASE_PATH = "base_path"
 CONF_LAYOUT_FILE = "layout_file"
+CONF_HTTP_PORT = "http_port"
 
 CONFIG_SCHEMA = cv.Schema(
     {
@@ -36,6 +37,8 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_PARTITION, default="storage"): cv.string_strict,
         cv.Optional(CONF_BASE_PATH, default="/fs"): cv.string_strict,
         cv.Optional(CONF_LAYOUT_FILE, default="layout.json"): cv.string_strict,
+        # 8080, а не 80: web_server ESPHome занимает 80.
+        cv.Optional(CONF_HTTP_PORT, default=8080): cv.port,
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
@@ -57,3 +60,4 @@ async def to_code(config):
     cg.add(var.set_partition(config[CONF_PARTITION]))
     cg.add(var.set_base_path(config[CONF_BASE_PATH]))
     cg.add(var.set_layout_file(config[CONF_LAYOUT_FILE]))
+    cg.add(var.set_http_port(config[CONF_HTTP_PORT]))

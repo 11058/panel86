@@ -2,12 +2,16 @@
 
 #include "esphome/core/log.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cerrno>
 #include <cstring>
 #include <vector>
 
 #include "esp_littlefs.h"
+#include "esp_http_server.h"
+
+#include "esphome/components/network/util.h"
 
 #include "esphome/components/json/json_util.h"
 #ifdef USE_API
@@ -46,6 +50,16 @@ void PanelUI::setup() {
     ESP_LOGW(TAG, "Раскладки нет — панель не настроена");
   } else {
     ESP_LOGI(TAG, "Раскладка найдена: %u байт", (unsigned) layout.size());
+  }
+}
+
+void PanelUI::loop() {
+  // HTTP-сервер нельзя поднимать в setup(): там ещё не инициализирован
+  // сетевой стек, и httpd падает с assert failed: xQueueSemaphoreTake.
+  // Поэтому лениво, при первом появлении сети.
+  if (!this->http_started_ && this->mounted_ && network::is_connected()) {
+    this->start_http_();
+    this->http_started_ = true;
   }
 }
 
@@ -291,6 +305,119 @@ void PanelUI::on_card_tapped(Card *card) {
   ESP_LOGI(TAG, "касание: %s -> %s", card->entity.c_str(), service.c_str());
   api::global_api_server->send_homeassistant_action(req);
 #endif
+}
+
+// ---------------------------------------------------------------------------
+// Управляющий канал: заливка раскладки по HTTP.
+//
+// Это то, с чем будет говорить веб-редактор. Отдельный сервер, а не
+// web_server ESPHome: тому нельзя добавить свои маршруты.
+//
+// GET  /layout.json — отдать текущую раскладку
+// POST /layout.json — сохранить новую и сразу перестроить экран
+// ---------------------------------------------------------------------------
+
+bool PanelUI::rebuild() {
+  if (this->root_ == nullptr) {
+    ESP_LOGW(TAG, "перестроение невозможно: контейнер не задан");
+    return false;
+  }
+  if (!this->build_ui(this->root_))
+    return false;
+  this->bind_entities();
+  return true;
+}
+
+static esp_err_t handle_get_layout(httpd_req_t *req) {
+  auto *self = static_cast<PanelUI *>(req->user_ctx);
+  const std::string data = self->read_layout();
+  httpd_resp_set_type(req, "application/json");
+  if (data.empty()) {
+    httpd_resp_set_status(req, "404 Not Found");
+    return httpd_resp_sendstr(req, "{\"error\":\"раскладки нет\"}");
+  }
+  return httpd_resp_send(req, data.c_str(), data.size());
+}
+
+static esp_err_t handle_post_layout(httpd_req_t *req) {
+  auto *self = static_cast<PanelUI *>(req->user_ctx);
+
+  // Верхняя граница нужна: без неё большой запрос съест память панели.
+  static const size_t MAX_LAYOUT = 64 * 1024;
+  if (req->content_len == 0 || req->content_len > MAX_LAYOUT) {
+    httpd_resp_set_status(req, "413 Payload Too Large");
+    return httpd_resp_sendstr(req, "{\"error\":\"пустая или слишком большая раскладка\"}");
+  }
+
+  std::string body;
+  body.reserve(req->content_len);
+  char buf[1024];
+  size_t left = req->content_len;
+  while (left > 0) {
+    int got = httpd_req_recv(req, buf, std::min(left, sizeof(buf)));
+    if (got <= 0) {
+      httpd_resp_set_status(req, "400 Bad Request");
+      return httpd_resp_sendstr(req, "{\"error\":\"обрыв приёма\"}");
+    }
+    body.append(buf, got);
+    left -= got;
+  }
+
+  // Сначала проверяем, что это вообще разбирается, и только потом пишем:
+  // испорченный JSON не должен затереть рабочую раскладку.
+  bool valid = json::parse_json(body, [](JsonObject doc) -> bool {
+    return !doc["pages"].as<JsonArray>().isNull();
+  });
+  if (!valid) {
+    ESP_LOGW(TAG, "отклонена нераспознанная раскладка (%u байт)", (unsigned) body.size());
+    httpd_resp_set_status(req, "422 Unprocessable Entity");
+    return httpd_resp_sendstr(req, "{\"error\":\"не разбирается или нет pages\"}");
+  }
+
+  if (!self->write_layout(body)) {
+    httpd_resp_set_status(req, "500 Internal Server Error");
+    return httpd_resp_sendstr(req, "{\"error\":\"не удалось сохранить\"}");
+  }
+
+  const bool built = self->rebuild();
+  httpd_resp_set_type(req, "application/json");
+  char out[128];
+  snprintf(out, sizeof(out), "{\"saved\":%u,\"cards\":%u,\"rebuilt\":%s}", (unsigned) body.size(),
+           (unsigned) self->card_count(), built ? "true" : "false");
+  return httpd_resp_sendstr(req, out);
+}
+
+void PanelUI::start_http_() {
+  httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
+  cfg.server_port = this->http_port_;
+  cfg.ctrl_port = this->http_port_ + 1000;  // иначе конфликт с web_server ESPHome
+  cfg.lru_purge_enable = true;
+  cfg.max_uri_handlers = 4;
+  cfg.stack_size = 8192;
+
+  httpd_handle_t server = nullptr;
+  esp_err_t err = httpd_start(&server, &cfg);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "HTTP-сервер не запустился на порту %u: %s", this->http_port_, esp_err_to_name(err));
+    return;
+  }
+  this->httpd_ = server;
+
+  httpd_uri_t get_uri = {};
+  get_uri.uri = "/layout.json";
+  get_uri.method = HTTP_GET;
+  get_uri.handler = handle_get_layout;
+  get_uri.user_ctx = this;
+  httpd_register_uri_handler(server, &get_uri);
+
+  httpd_uri_t post_uri = {};
+  post_uri.uri = "/layout.json";
+  post_uri.method = HTTP_POST;
+  post_uri.handler = handle_post_layout;
+  post_uri.user_ctx = this;
+  httpd_register_uri_handler(server, &post_uri);
+
+  ESP_LOGI(TAG, "приём раскладки: http://<панель>:%u/layout.json", this->http_port_);
 }
 
 }  // namespace panel_ui

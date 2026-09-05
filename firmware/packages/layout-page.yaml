@@ -25,8 +25,8 @@ button:
     name: "Построить интерфейс из раскладки"
     entity_category: diagnostic
     on_press:
-      - lambda: 'id(panel_storage)->build_ui(id(ui_root));'
-      - lambda: 'id(panel_storage)->bind_entities();'
+      - lambda: 'id(panel_storage)->set_root(id(ui_root));'
+      - lambda: 'id(panel_storage)->rebuild();'
       - lvgl.page.show: page_layout
 
   - platform: template

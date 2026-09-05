@@ -15,12 +15,18 @@ namespace panel_ui {
 class PanelUI : public Component {
  public:
   void setup() override;
+  void loop() override;
   void dump_config() override;
   float get_setup_priority() const override { return setup_priority::DATA; }
 
   void set_partition(const char *label) { this->partition_ = label; }
   void set_base_path(const char *path) { this->base_path_ = path; }
   void set_layout_file(const char *name) { this->layout_file_ = name; }
+  void set_http_port(uint16_t port) { this->http_port_ = port; }
+
+  /// Контейнер, в который строится интерфейс. Запоминается, чтобы
+  /// перестроение по HTTP не требовало передавать его заново.
+  void set_root(void *root) { this->root_ = root; }
 
   bool is_mounted() const { return this->mounted_; }
 
@@ -62,15 +68,24 @@ class PanelUI : public Component {
 
   size_t card_count() const { return this->cards_.size(); }
 
+  /// Перестроить интерфейс из того, что сейчас лежит в файле.
+  /// Используется после заливки новой раскладки по HTTP.
+  bool rebuild();
+
  protected:
   void render_card_(void *parent, Card *card, int x, int y, int w, int h);
   void update_card_value_(Card *card, const std::string &state);
+  void start_http_();
 
   std::vector<Card *> cards_;
   const char *partition_{"storage"};
   const char *base_path_{"/fs"};
   const char *layout_file_{"layout.json"};
+  uint16_t http_port_{8080};
+  void *root_{nullptr};   // lv_obj_t *
+  void *httpd_{nullptr};  // httpd_handle_t
   bool mounted_{false};
+  bool http_started_{false};
 };
 
 }  // namespace panel_ui
