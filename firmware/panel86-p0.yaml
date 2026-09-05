@@ -43,6 +43,22 @@ esphome:
               - lvgl.page.show: page_wifi_list
               - script.execute: wifi_scan_start
 
+# Своя таблица разделов: штатная не оставляет места под файловую систему.
+# Прошивать ТОЛЬКО по USB — смена таблицы по OTA не проходит.
+esp32:
+  partitions: partitions.csv
+
+# Свой компонент: хранилище раскладки. Начало P3.
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components: [ panel_ui ]
+
+panel_ui:
+  id: panel_storage
+  partition: storage
+
 packages:
   board: !include packages/board.yaml
   eth:   !include packages/net-ethernet.yaml

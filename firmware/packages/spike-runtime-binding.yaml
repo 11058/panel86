@@ -50,3 +50,30 @@ button:
             });
           ESP_LOGI("spike", "подписок в списке сейчас: %u",
                    (unsigned) api::global_api_server->get_state_subs().size());
+
+# --- Проверка хранилища раскладки: запись, чтение, целостность ---
+  - platform: template
+    name: "Спайк: проверить хранилище"
+    entity_category: diagnostic
+    on_press:
+      - lambda: |-
+          auto *ui = id(panel_storage);
+          std::string sample =
+            "{\"schema\":\"panel86/1\",\"room\":\"gostinaia\",\"revision\":1,"
+            "\"pages\":[{\"id\":\"home\",\"title\":\"Гостиная\",\"cards\":["
+            "{\"type\":\"light\",\"entity\":\"light.esp8266sw1_relay_1\"},"
+            "{\"type\":\"climate\",\"entity\":\"climate.iug_lugovaia_12_gostinaia_2\"}]}]}";
+
+          ESP_LOGI("storage", "=== проверка хранилища ===");
+          ESP_LOGI("storage", "пишу %u байт", (unsigned) sample.size());
+          bool ok = ui->write_layout(sample);
+          ESP_LOGI("storage", "запись: %s", ok ? "успех" : "ОШИБКА");
+
+          std::string back = ui->read_layout();
+          ESP_LOGI("storage", "прочитано %u байт", (unsigned) back.size());
+          ESP_LOGI("storage", "совпадает побайтно: %s", back == sample ? "ДА" : "НЕТ");
+
+          size_t used = 0, total = 0;
+          ui->fs_usage(&used, &total);
+          ESP_LOGI("storage", "занято %u КиБ из %u КиБ",
+                   (unsigned)(used/1024), (unsigned)(total/1024));
