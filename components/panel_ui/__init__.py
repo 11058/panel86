@@ -19,7 +19,8 @@ from esphome.components.esp32 import add_idf_component, require_vfs_dir
 from esphome.const import CONF_ID
 
 CODEOWNERS = ["@11058"]
-DEPENDENCIES = ["esp32"]
+DEPENDENCIES = ["esp32", "json"]
+AUTO_LOAD = ["json"]
 
 panel_ui_ns = cg.esphome_ns.namespace("panel_ui")
 PanelUI = panel_ui_ns.class_("PanelUI", cg.Component)
@@ -43,6 +44,14 @@ async def to_code(config):
     add_idf_component(name="joltwallet/littlefs", ref="1.16.4")
     # Без этого remove()/rename() на LittleFS возвращают ENOSYS.
     require_vfs_dir()
+
+    # Рантайм-часть API Home Assistant существует в прошивке только за этими
+    # ifdef-ами, а ESPHome включает их лишь при КОМПИЛИРУЕМОМ использовании:
+    # подписке через platform: homeassistant или вызове homeassistant.action.
+    # Нам нужно и то, и другое в рантайме, поэтому объявляем сами —
+    # так пользователю компонента не нужен ни фиктивный «якорь», ни лишний YAML.
+    cg.add_define("USE_API_HOMEASSISTANT_STATES")
+    cg.add_define("USE_API_HOMEASSISTANT_SERVICES")
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     cg.add(var.set_partition(config[CONF_PARTITION]))

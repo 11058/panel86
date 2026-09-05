@@ -18,17 +18,7 @@
 # Этот пакет проверяет гипотезу на живом сервере. Удалить после P2.
 # ---------------------------------------------------------------------------
 
-# Подписка-якорь. Нужна не ради значения, а ради того, чтобы вообще
-# включился USE_API_HOMEASSISTANT_STATES: без единой КОМПИЛИРУЕМОЙ подписки
-# методов subscribe_home_assistant_state и get_state_subs в прошивке нет.
-# Само по себе это ограничение архитектуры: UI-VM обязан всегда объявлять
-# хотя бы одну статическую подписку, даже пустышку.
 text_sensor:
-  - platform: homeassistant
-    id: anchor_sub
-    entity_id: sensor.iug_lugovaia_12_gostinaia_2
-    internal: true
-
   - platform: template
     id: spike_ha_value
     name: "Спайк: значение из HA"

@@ -65,6 +65,7 @@ packages:
   wifi:  !include packages/net-wifi.yaml
   wifiui: !include packages/wifi-setup-ui.yaml
   spike: !include packages/spike-runtime-binding.yaml
+  layout: !include packages/layout-page.yaml
 
 # Оба канала одновременно. Первый в списке — приоритетный: именно он
 # держит маршрут по умолчанию, второй остаётся горячим резервом.

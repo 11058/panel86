@@ -1,0 +1,48 @@
+# ---------------------------------------------------------------------------
+# Страница, которую рисует интерпретатор panel_ui.
+#
+# В YAML она пустая: это только контейнер. Всё содержимое строится
+# в рантайме из layout.json — в этом вся суть, см. ADR-0001.
+# ---------------------------------------------------------------------------
+
+lvgl:
+  pages:
+    - id: page_layout
+      widgets:
+        - obj:
+            id: ui_root
+            x: 0
+            y: 0
+            width: 720
+            height: 720
+            scrollable: false
+            pad_all: 0
+            border_width: 0
+            radius: 0
+
+button:
+  - platform: template
+    name: "Построить интерфейс из раскладки"
+    entity_category: diagnostic
+    on_press:
+      - lambda: 'id(panel_storage)->build_ui(id(ui_root));'
+      - lambda: 'id(panel_storage)->bind_entities();'
+      - lvgl.page.show: page_layout
+
+  - platform: template
+    name: "Записать пример раскладки"
+    entity_category: diagnostic
+    on_press:
+      # Реальные сущности из вашего HA: гостиная.
+      - lambda: |-
+          std::string sample =
+            "{\"schema\":\"panel86/1\",\"room\":\"gostinaia\",\"revision\":1,"
+            "\"pages\":[{\"id\":\"home\",\"title\":\"Гостиная\",\"grid\":[2,3],\"cards\":["
+            "{\"type\":\"light\",\"entity\":\"light.esp8266sw1_relay_1\",\"label\":\"Люстра\"},"
+            "{\"type\":\"light\",\"entity\":\"light.esp8266sw1_relay_2\",\"label\":\"Бра\"},"
+            "{\"type\":\"climate\",\"entity\":\"climate.iug_lugovaia_12_gostinaia_2\",\"label\":\"Отопление\"},"
+            "{\"type\":\"sensor\",\"entity\":\"sensor.iug_lugovaia_12_gostinaia_2\",\"label\":\"Температура\"},"
+            "{\"type\":\"sensor\",\"entity\":\"sensor.kca6watertower_pzem_voltage\",\"label\":\"Напряжение\"},"
+            "{\"type\":\"switch\",\"entity\":\"switch.kca6watertower_pumpmotor\",\"label\":\"Насос\"}"
+            "]}]}";
+          id(panel_storage)->write_layout(sample);
