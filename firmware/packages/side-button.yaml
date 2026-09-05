@@ -1,0 +1,28 @@
+# ---------------------------------------------------------------------------
+# Боковая кнопка на GPIO35.
+#
+# НЕСОВМЕСТИМО С ETHERNET. GPIO35 — это EMAC_TXD1: подключать её можно
+# только вместе с packages/net-wifi.yaml.
+#
+# Проверка ловит конфликт сама:
+#   ethernet: GPIO35 is used by Ethernet RMII (EMAC_TXD1) ... This conflicts
+# ---------------------------------------------------------------------------
+
+binary_sensor:
+  - platform: gpio
+    id: side_button
+    pin:
+      number: GPIO35
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+    name: "Боковая кнопка"
+    on_multi_click:
+      - timing: [ON for at most 1s, OFF for at least 0.3s]
+        then:
+          - light.toggle: backlight
+      - timing: [ON for at least 4s]
+        then:
+          - logger.log: "Удержание кнопки — перезагрузка"
+          - button.press: btn_restart

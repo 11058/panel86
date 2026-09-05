@@ -80,25 +80,11 @@ switch:
     name: "Реле 2"
     restore_mode: RESTORE_DEFAULT_OFF
 
-# --- Боковая кнопка. Аппаратный путь отхода, когда UI завис. ---
-binary_sensor:
-  - platform: gpio
-    id: side_button
-    pin:
-      number: GPIO35
-      inverted: true
-      mode:
-        input: true
-        pullup: true
-    name: "Боковая кнопка"
-    on_multi_click:
-      - timing: [ON for at most 1s, OFF for at least 0.3s]
-        then:
-          - light.toggle: backlight
-      - timing: [ON for at least 4s]
-        then:
-          - logger.log: "Удержание кнопки — перезагрузка"
-          - button.press: btn_restart
+# --- Боковая кнопка вынесена в packages/side-button.yaml ---
+# GPIO35 на этой плате — EMAC_TXD1, то есть часть интерфейса Ethernet.
+# Кнопка и Ethernet одновременно невозможны. Поскольку Ethernet у нас
+# основной канал (ADR-0003), кнопки в базовой конфигурации нет.
+# Нашлось валидацией `esphome config`, а не на плате.
 
 button:
   - platform: restart

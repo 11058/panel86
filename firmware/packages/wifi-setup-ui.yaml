@@ -1,0 +1,268 @@
+# ---------------------------------------------------------------------------
+# Настройка Wi-Fi прямо на экране панели: поиск сетей, выбор, ввод пароля,
+# сохранение в NVS.
+#
+# Зачем: настенная панель не должна требовать телефона или ноутбука.
+# У ESPHome штатно есть captive_portal (AP + страница в браузере телефона)
+# и improv_serial (по USB) — оба работают, но оба уводят пользователя
+# с панели на другое устройство.
+#
+# Как устроено:
+#   - список сетей берётся из wifi::global_wifi_component->get_scan_result()
+#     и заливается в roller через lv_roller_set_options() — из YAML список
+#     задать нельзя, он там статический;
+#   - пароль вводится LVGL-клавиатурой в textarea;
+#   - подключение и сохранение — штатным действием wifi.configure,
+#     у которого save: true по умолчанию, то есть запись в NVS.
+#
+# ВНИМАНИЕ: start_scanning() на уже подключённом устройстве может разорвать
+# текущее соединение — это нормально для экрана перенастройки, но не надо
+# дёргать сканирование фоном.
+# ---------------------------------------------------------------------------
+
+globals:
+  - id: scan_ssids
+    type: std::vector<std::string>
+    restore_value: false
+  - id: chosen_ssid
+    type: std::string
+    restore_value: false
+
+script:
+  # Запустить поиск сетей
+  - id: wifi_scan_start
+    mode: restart
+    then:
+      - lvgl.label.update:
+          id: lbl_wifi_status
+          text: "Поиск сетей…"
+      - lambda: |-
+          id(scan_ssids).clear();
+          wifi::global_wifi_component->set_keep_scan_results(true);
+          wifi::global_wifi_component->start_scanning();
+      - delay: 4s
+      - script.execute: wifi_scan_collect
+
+  # Забрать результаты и залить в roller
+  - id: wifi_scan_collect
+    mode: single
+    then:
+      - lambda: |-
+          const auto &res = wifi::global_wifi_component->get_scan_result();
+          id(scan_ssids).clear();
+          std::string opts;
+          for (const auto &r : res) {
+            if (r.get_is_hidden()) continue;
+            std::string s(r.get_ssid().c_str(), r.get_ssid().size());
+            if (s.empty()) continue;
+            bool dup = false;
+            for (const auto &seen : id(scan_ssids)) if (seen == s) { dup = true; break; }
+            if (dup) continue;
+            id(scan_ssids).push_back(s);
+            char row[64];
+            snprintf(row, sizeof(row), "%s  %d dBm%s", s.c_str(), (int) r.get_rssi(),
+                     r.get_with_auth() ? "" : "  (открытая)");
+            if (!opts.empty()) opts += "\n";
+            opts += row;
+          }
+          if (id(scan_ssids).empty()) {
+            lv_roller_set_options(id(rlr_wifi)->obj, "сетей не найдено", LV_ROLLER_MODE_NORMAL);
+          } else {
+            lv_roller_set_options(id(rlr_wifi)->obj, opts.c_str(), LV_ROLLER_MODE_NORMAL);
+          }
+          ESP_LOGI("wifi_setup", "найдено сетей: %u", (unsigned) id(scan_ssids).size());
+      - lvgl.label.update:
+          id: lbl_wifi_status
+          text: !lambda |-
+            char b[48];
+            snprintf(b, sizeof(b), "Найдено сетей: %u", (unsigned) id(scan_ssids).size());
+            return {b};
+
+lvgl:
+  pages:
+    # --- Экран 1: выбор сети ---
+    - id: page_wifi_list
+      widgets:
+        - label:
+            text: "Настройка Wi-Fi"
+            align: TOP_MID
+            y: 20
+            text_font: f_title
+        - button:
+            id: btn_wifi_exit
+            align: TOP_LEFT
+            x: 20
+            y: 14
+            width: 150
+            height: 54
+            widgets:
+              - label:
+                  text: "Назад"
+                  align: CENTER
+            on_click:
+              - lvgl.page.show: page_p0
+        - label:
+            id: lbl_wifi_status
+            text: "Нажмите «Искать»"
+            align: TOP_MID
+            y: 66
+            text_font: f_small
+        - roller:
+            id: rlr_wifi
+            align: TOP_MID
+            y: 100
+            width: 640
+            height: 300
+            visible_row_count: 5
+            options:
+              - "нажмите «Искать»"
+        - button:
+            id: btn_wifi_hidden
+            align: BOTTOM_MID
+            y: -40
+            width: 620
+            height: 64
+            widgets:
+              - label:
+                  text: "Скрытая сеть — ввести имя вручную"
+                  align: CENTER
+            on_click:
+              - lambda: 'id(chosen_ssid) = "";'
+              - lvgl.page.show: page_wifi_pass
+        - button:
+            id: btn_wifi_scan
+            align: BOTTOM_LEFT
+            x: 40
+            y: -120
+            width: 290
+            height: 78
+            widgets:
+              - label:
+                  text: "Искать"
+                  align: CENTER
+            on_click:
+              - script.execute: wifi_scan_start
+        - button:
+            id: btn_wifi_next
+            align: BOTTOM_RIGHT
+            x: -40
+            y: -120
+            width: 290
+            height: 78
+            widgets:
+              - label:
+                  text: "Далее"
+                  align: CENTER
+            on_click:
+              - lambda: |-
+                  size_t idx = id(rlr_wifi)->get_selected_index();
+                  if (idx < id(scan_ssids).size()) {
+                    id(chosen_ssid) = id(scan_ssids)[idx];
+                  }
+              - if:
+                  condition:
+                    lambda: 'return !id(chosen_ssid).empty();'
+                  then:
+                    - lambda: |-
+                        lv_textarea_set_text(id(ta_wifi_ssid), id(chosen_ssid).c_str());
+                    - lvgl.page.show: page_wifi_pass
+
+    # --- Экран 2: имя сети и пароль ---
+    #
+    # Одна клавиатура на два поля, а не по клавиатуре на экран.
+    # Две LVGL-клавиатуры в одной прошивке приводили к зависанию loopTask
+    # и циклу перезагрузок по сторожевому таймеру — см. docs/01-p0-bringup.md.
+    #
+    # Поле имени редактируемое: скрытые сети не появляются в сканировании
+    # в принципе, и без ручного ввода к ним не подключиться. Обнаружено
+    # на живой сети — SRVPRMiot вещает скрыто.
+    - id: page_wifi_pass
+      widgets:
+        - label:
+            text: "Подключение"
+            align: TOP_MID
+            y: 14
+            text_font: f_title
+        - textarea:
+            id: ta_wifi_ssid
+            align: TOP_MID
+            y: 62
+            width: 640
+            height: 62
+            one_line: true
+            max_length: 32
+            placeholder_text: "имя сети"
+            on_click:
+              - lambda: 'lv_keyboard_set_textarea(id(kb_wifi)->obj, id(ta_wifi_ssid));'
+        - textarea:
+            id: ta_wifi_pwd
+            align: TOP_MID
+            y: 132
+            width: 640
+            height: 62
+            one_line: true
+            max_length: 63
+            placeholder_text: "пароль"
+            on_click:
+              - lambda: 'lv_keyboard_set_textarea(id(kb_wifi)->obj, id(ta_wifi_pwd));'
+        - label:
+            id: lbl_wifi_result
+            text: "коснитесь поля, чтобы вводить"
+            align: TOP_MID
+            y: 202
+            text_font: f_small
+        - button:
+            id: btn_wifi_back
+            align: TOP_LEFT
+            x: 40
+            y: 232
+            width: 290
+            height: 72
+            widgets:
+              - label:
+                  text: "Назад"
+                  align: CENTER
+            on_click:
+              - lvgl.page.show: page_wifi_list
+        - button:
+            id: btn_wifi_join
+            align: TOP_RIGHT
+            x: -40
+            y: 232
+            width: 290
+            height: 72
+            widgets:
+              - label:
+                  text: "Подключить"
+                  align: CENTER
+            on_click:
+              - lvgl.label.update:
+                  id: lbl_wifi_result
+                  text: "Подключение…"
+              - wifi.configure:
+                  ssid: !lambda 'return std::string(lv_textarea_get_text(id(ta_wifi_ssid)));'
+                  password: !lambda 'return std::string(lv_textarea_get_text(id(ta_wifi_pwd)));'
+                  save: true
+                  timeout: 20s
+                  on_connect:
+                    - lvgl.label.update:
+                        id: lbl_wifi_result
+                        text: "Подключено, сохранено в памяти"
+                    - delay: 2s
+                    - lvgl.page.show: page_p0
+                  on_error:
+                    - lvgl.label.update:
+                        id: lbl_wifi_result
+                        text: "Не удалось. Проверьте имя и пароль"
+        - keyboard:
+            id: kb_wifi
+            textarea: ta_wifi_pwd
+            align: BOTTOM_MID
+            width: 720
+            height: 300
+            # Клавиши со стрелками, Shift, Backspace и Enter рисуются
+            # символами LVGL из приватной области Unicode. В наших шрифтах
+            # с GF_Latin_Core + GF_Cyrillic_Core их нет — выходили квадратики.
+            # Встроенный montserrat эти символы содержит, а кириллица
+            # на латинской клавиатуре и не нужна.
+            text_font: montserrat_20

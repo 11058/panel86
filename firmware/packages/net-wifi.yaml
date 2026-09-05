@@ -28,6 +28,10 @@ wifi:
 
 captive_portal:
 
+# Обновлятору прошивки C6 нужен HTTP-клиент.
+http_request:
+  verify_ssl: false
+
 # Прошивка C6 обновляется по воздуху отдельно от основной.
 update:
   - platform: esp32_hosted

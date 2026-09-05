@@ -12,8 +12,8 @@
 # ===========================================================================
 
 substitutions:
-  name: panel86-p0
-  friendly_name: "Панель 86 · P0"
+  name: panel86-prov
+  friendly_name: "Панель 86 · провижининг"
 
 esphome:
   name: ${name}
@@ -46,7 +46,7 @@ esphome:
 packages:
   board: !include packages/board.yaml
   eth:   !include packages/net-ethernet.yaml
-  wifi:  !include packages/net-wifi.yaml
+  wifi:  !include packages/net-wifi-provision.yaml
   wifiui: !include packages/wifi-setup-ui.yaml
 
 # Оба канала одновременно. Первый в списке — приоритетный: именно он

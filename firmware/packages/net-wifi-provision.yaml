@@ -1,0 +1,47 @@
+# ---------------------------------------------------------------------------
+# Профиль сети для готового изделия: НИКАКИХ зашитых учётных данных.
+#
+# Панель поднимает точку доступа, показывает экран настройки и ждёт, пока
+# сеть выберут на самой панели. Введённое сохраняется в NVS действием
+# wifi.configure (save: true) и переживает перезагрузку и OTA.
+#
+# Этим же профилем проверяется, что сохранение вообще работает: пока имя
+# сети зашито в secrets.yaml, отличить «взяла из памяти» от «взяла
+# из прошивки» невозможно.
+#
+# Для разработки используйте packages/net-wifi.yaml — там сеть зашита.
+# ---------------------------------------------------------------------------
+
+esp32_hosted:
+  variant: ESP32C6
+  active_high: true
+  reset_pin: GPIO54
+  cmd_pin: GPIO19
+  clk_pin: GPIO18
+  d0_pin: GPIO14
+  d1_pin: GPIO15
+  d2_pin: GPIO16
+  d3_pin: GPIO17
+
+wifi:
+  # ssid/password намеренно отсутствуют: has_sta() будет ложным,
+  # и панель сама откроет экран настройки.
+  power_save_mode: NONE
+  reboot_timeout: 0s          # без сети не перезагружаться — иначе не настроить
+  ap:
+    ssid: "panel86-setup"
+    password: !secret wifi_fallback_pwd
+
+# Запасной путь настройки — с телефона, если экран недоступен.
+captive_portal:
+
+http_request:
+  verify_ssl: false
+
+update:
+  - platform: esp32_hosted
+    id: c6_firmware
+    name: "Прошивка C6"
+    entity_category: diagnostic
+    type: http
+    source: "https://esphome.github.io/esp-hosted-firmware/manifest/esp32c6.json"
