@@ -1,0 +1,52 @@
+# ---------------------------------------------------------------------------
+# СПАЙК P2: можно ли привязать сущность Home Assistant в рантайме,
+# не пересобирая прошивку.
+#
+# Это точка невозврата архитектуры. Если да — вся привязка идёт через
+# нативный API ESPHome: без токенов, без второго соединения, устройство
+# остаётся нормальным устройством в реестре HA (план A).
+# Если нет — придётся поднимать свой WebSocket к HA (план Б), а это
+# долгоживущий токен на панели и свой парсер стейт-машины.
+#
+# Что показало чтение исходников api_connection.cpp:
+#   - HA запрашивает список подписок ОДИН раз, при подключении;
+#   - устройство отдаёт его по одной штуке, пока индекс не дойдёт до конца,
+#     после чего ставит state_subs_at_ = -1 и больше ничего не шлёт;
+#   - индекс приватный, обнулить его снаружи нельзя.
+# Отсюда гипотеза: подписка в рантайме не дойдёт до HA без переподключения.
+#
+# Этот пакет проверяет гипотезу на живом сервере. Удалить после P2.
+# ---------------------------------------------------------------------------
+
+# Подписка-якорь. Нужна не ради значения, а ради того, чтобы вообще
+# включился USE_API_HOMEASSISTANT_STATES: без единой КОМПИЛИРУЕМОЙ подписки
+# методов subscribe_home_assistant_state и get_state_subs в прошивке нет.
+# Само по себе это ограничение архитектуры: UI-VM обязан всегда объявлять
+# хотя бы одну статическую подписку, даже пустышку.
+text_sensor:
+  - platform: homeassistant
+    id: anchor_sub
+    entity_id: sensor.iug_lugovaia_12_gostinaia_2
+    internal: true
+
+  - platform: template
+    id: spike_ha_value
+    name: "Спайк: значение из HA"
+    entity_category: diagnostic
+    update_interval: never
+
+button:
+  - platform: template
+    name: "Спайк: подписаться в рантайме"
+    entity_category: diagnostic
+    on_press:
+      - lambda: |-
+          ESP_LOGI("spike", "=== подписка В РАНТАЙМЕ на sensor.kca6watertower_pzem_voltage ===");
+          api::global_api_server->subscribe_home_assistant_state(
+            "sensor.kca6watertower_pzem_voltage", nullptr,
+            [](StringRef s) {
+              ESP_LOGI("spike", ">>> ПРИШЛО СОСТОЯНИЕ: %s", s.c_str());
+              id(spike_ha_value).publish_state(std::string(s.c_str()));
+            });
+          ESP_LOGI("spike", "подписок в списке сейчас: %u",
+                   (unsigned) api::global_api_server->get_state_subs().size());
