@@ -540,8 +540,24 @@ bool PanelUI::rebuild() {
   return true;
 }
 
+// Редактор открывается с другого источника (файл на диске или другой хост),
+// поэтому без заголовков CORS браузер запрос не выпустит.
+static void add_cors(httpd_req_t *req) {
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", "Content-Type");
+}
+
+// Предварительный запрос браузера перед POST с JSON.
+static esp_err_t handle_options(httpd_req_t *req) {
+  add_cors(req);
+  httpd_resp_set_status(req, "204 No Content");
+  return httpd_resp_send(req, nullptr, 0);
+}
+
 static esp_err_t handle_get_layout(httpd_req_t *req) {
   auto *self = static_cast<PanelUI *>(req->user_ctx);
+  add_cors(req);
   const std::string data = self->read_layout();
   httpd_resp_set_type(req, "application/json");
   if (data.empty()) {
@@ -553,6 +569,7 @@ static esp_err_t handle_get_layout(httpd_req_t *req) {
 
 static esp_err_t handle_post_layout(httpd_req_t *req) {
   auto *self = static_cast<PanelUI *>(req->user_ctx);
+  add_cors(req);
 
   // Верхняя граница нужна: без неё большой запрос съест память панели.
   static const size_t MAX_LAYOUT = 64 * 1024;
@@ -604,7 +621,7 @@ void PanelUI::start_http_() {
   cfg.server_port = this->http_port_;
   cfg.ctrl_port = this->http_port_ + 1000;  // иначе конфликт с web_server ESPHome
   cfg.lru_purge_enable = true;
-  cfg.max_uri_handlers = 4;
+  cfg.max_uri_handlers = 6;
   cfg.stack_size = 8192;
 
   httpd_handle_t server = nullptr;
@@ -621,6 +638,13 @@ void PanelUI::start_http_() {
   get_uri.handler = handle_get_layout;
   get_uri.user_ctx = this;
   httpd_register_uri_handler(server, &get_uri);
+
+  httpd_uri_t opt_uri = {};
+  opt_uri.uri = "/layout.json";
+  opt_uri.method = HTTP_OPTIONS;
+  opt_uri.handler = handle_options;
+  opt_uri.user_ctx = this;
+  httpd_register_uri_handler(server, &opt_uri);
 
   httpd_uri_t post_uri = {};
   post_uri.uri = "/layout.json";

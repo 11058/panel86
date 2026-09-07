@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редактор раскладки · Панель 86</title>
+<style>
+  :root{
+    --bg:#12171c; --surface:#1a2128; --surface-2:#222b33; --inset:#0e1317;
+    --ink:#e3e9ee; --ink-2:#9aa8b4; --ink-3:#6b7b88;
+    --rule:#2b353e; --accent:#e9a45c; --good:#4fbfc6; --bad:#f08a7e;
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  }
+  header{
+    display:flex; gap:14px; align-items:center; flex-wrap:wrap;
+    padding:14px 20px; background:var(--surface); border-bottom:1px solid var(--rule);
+  }
+  header h1{font-size:16px; margin:0 12px 0 0; font-weight:600; letter-spacing:-.01em}
+  header .sp{flex:1}
+  input,select,button,textarea{
+    font:inherit; color:var(--ink); background:var(--inset);
+    border:1px solid var(--rule); border-radius:6px; padding:7px 10px;
+  }
+  input[type=number]{width:88px}
+  button{cursor:pointer; background:var(--surface-2); transition:border-color .12s}
+  button:hover{border-color:var(--accent)}
+  button.primary{background:var(--accent); color:#1a1206; border-color:var(--accent); font-weight:600}
+  button.danger:hover{border-color:var(--bad); color:var(--bad)}
+  .mono{font-family:var(--mono); font-size:13px}
+  main{display:grid; grid-template-columns:340px 1fr 320px; gap:1px; background:var(--rule);
+       min-height:calc(100vh - 59px)}
+  @media (max-width:1100px){ main{grid-template-columns:1fr} }
+  section{background:var(--bg); padding:18px 20px; overflow:auto}
+  h2{font-size:11px; text-transform:uppercase; letter-spacing:.14em; color:var(--ink-3);
+     margin:0 0 14px; font-weight:700; font-family:var(--mono)}
+  label{display:block; font-size:12px; color:var(--ink-2); margin:12px 0 4px}
+  label:first-of-type{margin-top:0}
+  .row{display:flex; gap:8px; align-items:center; flex-wrap:wrap}
+  .pages{display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px}
+  .pages button{padding:6px 12px; font-size:13px}
+  .pages button.on{background:var(--accent); color:#1a1206; border-color:var(--accent)}
+
+  /* Превью повторяет то, что рисует панель: 720x720, та же сетка и стиль. */
+  .screen{
+    width:520px; height:520px; background:#0b0f13; border-radius:10px;
+    border:1px solid var(--rule); position:relative; overflow:hidden; margin:0 auto;
+  }
+  .screen .title{
+    position:absolute; top:6px; left:0; right:0; text-align:center;
+    font-size:21px; font-weight:600;
+  }
+  .card{
+    position:absolute; border-radius:14px; border:2px solid var(--ink-3);
+    padding:10px; cursor:pointer; overflow:hidden; transition:transform .08s;
+  }
+  .card:hover{transform:translateY(-1px)}
+  .card.sel{outline:2px solid var(--accent); outline-offset:2px}
+  .card .n{font-size:12px; color:var(--ink-2); white-space:nowrap; overflow:hidden;
+           text-overflow:ellipsis}
+  .card .v{font-size:21px; font-weight:600; position:absolute; left:10px; top:50%;
+           transform:translateY(-35%)}
+  .card .s{font-size:11px; color:var(--ink-3); position:absolute; left:10px; bottom:8px}
+  .card.empty{border-style:dashed; border-color:var(--rule); cursor:pointer}
+  .card.empty .n{color:var(--ink-3); text-align:center; margin-top:28%}
+
+  .status{font-family:var(--mono); font-size:12px; padding:8px 12px; border-radius:6px;
+          margin-top:14px; display:none; white-space:pre-wrap}
+  .status.ok{display:block; background:#122a2c; color:var(--good); border:1px solid #1d4247}
+  .status.err{display:block; background:#331c1a; color:var(--bad); border:1px solid #5a2d28}
+  textarea{width:100%; height:220px; font-family:var(--mono); font-size:12px; resize:vertical}
+  .hint{font-size:12px; color:var(--ink-3); margin-top:8px}
+  .del{margin-top:16px}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Редактор раскладки</h1>
+  <input id="host" class="mono" placeholder="10.1.20.115:8080" style="width:190px">
+  <button id="load">Загрузить с панели</button>
+  <button id="save" class="primary">Отправить на панель</button>
+  <span class="sp"></span>
+  <button id="fromFile">Открыть файл</button>
+  <button id="toFile">Сохранить в файл</button>
+  <input id="file" type="file" accept="application/json" hidden>
+</header>
+
+<main>
+  <!-- ЛЕВО: страницы и тема -->
+  <section>
+    <h2>Страницы</h2>
+    <div class="pages" id="pageTabs"></div>
+    <div class="row">
+      <button id="addPage">+ страница</button>
+      <button id="delPage" class="danger">удалить</button>
+    </div>
+
+    <label>Заголовок страницы</label>
+    <input id="pTitle" style="width:100%">
+    <label>Сетка: колонок × строк</label>
+    <div class="row">
+      <input id="pCols" type="number" min="1" max="4">
+      <span style="color:var(--ink-3)">×</span>
+      <input id="pRows" type="number" min="1" max="4">
+    </div>
+    <p class="hint">На 720 × 720 больше 2 × 4 нечитаемо пальцем.</p>
+
+    <h2 style="margin-top:26px">Тема</h2>
+    <label>Акцент</label>
+    <div class="row">
+      <input id="tAccent" type="color" style="width:52px; padding:2px">
+      <input id="tAccentHex" class="mono" style="width:100px">
+    </div>
+    <label>Скругление</label>
+    <input id="tRadius" type="number" min="0" max="48">
+
+    <h2 style="margin-top:26px">Подавление дребезга</h2>
+    <label>Не чаще, чем раз в</label>
+    <input id="dThrottle" class="mono" placeholder="1s" style="width:100px">
+    <label>Порог изменения (deadband)</label>
+    <input id="dDeadband" type="number" step="0.1" min="0">
+    <p class="hint">Датчик напряжения обновляется раз в 1,6 с, и 88 % изменений
+      меньше 0,5 В — это шум АЦП. Без подавления карточка дёргается вечно
+      и не даёт экрану уснуть.</p>
+  </section>
+
+  <!-- ЦЕНТР: экран -->
+  <section>
+    <h2>Экран панели · 720 × 720</h2>
+    <div class="screen" id="screen"></div>
+    <div class="status" id="status"></div>
+  </section>
+
+  <!-- ПРАВО: карточка -->
+  <section>
+    <h2>Карточка</h2>
+    <div id="cardForm" style="display:none">
+      <label>Тип</label>
+      <select id="cType" style="width:100%"></select>
+      <label>Сущность Home Assistant</label>
+      <input id="cEntity" class="mono" style="width:100%" placeholder="light.kitchen">
+      <label>Подпись</label>
+      <input id="cLabel" style="width:100%" placeholder="как назвать на экране">
+      <div id="numFields">
+        <label>Единицы</label>
+        <input id="cUnit" style="width:100%" placeholder="°C">
+        <label>Знаков после запятой</label>
+        <input id="cDec" type="number" min="0" max="3">
+        <label>Тревога выше / ниже</label>
+        <div class="row">
+          <input id="cWarnAbove" type="number" step="0.1" placeholder="выше">
+          <input id="cWarnBelow" type="number" step="0.1" placeholder="ниже">
+        </div>
+      </div>
+      <button id="delCard" class="danger del">Удалить карточку</button>
+    </div>
+    <p id="noCard" class="hint">Выберите карточку на экране или нажмите пустую клетку,
+      чтобы добавить.</p>
+
+    <h2 style="margin-top:26px">JSON</h2>
+    <textarea id="json" class="mono" spellcheck="false"></textarea>
+    <p class="hint">Правки здесь применяются при потере фокуса.</p>
+  </section>
+</main>
+
+<script>
+"use strict";
+
+// Каталог намеренно закрытый — тот же, что в схеме и в прошивке.
+const TYPES = ["light","switch","climate","cover","valve","scene","script",
+               "sensor","media","camera","lock","relay","room_grid","spacer"];
+const NUMERIC = new Set(["sensor","climate"]);
+const CONTROLLABLE = new Set(["light","switch","valve","cover","scene","script","lock"]);
+
+const BLANK = {
+  schema:"panel86/1", room:"", revision:1,
+  theme:{accent:"#C2610C", radius:16},
+  defaults:{throttle:"1s", deadband:0.5},
+  pages:[{id:"home", title:"Комната", grid:[2,3], cards:[]}]
+};
+
+let doc = structuredClone(BLANK);
+let pageIx = 0, cardIx = -1;
+
+const $ = id => document.getElementById(id);
+const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+
+function accentFor(type){
+  const a = doc.theme?.accent || "#C2610C";
+  if (["light","switch","scene","script"].includes(type)) return a;
+  if (type === "climate") return "#c05050";
+  if (["valve","cover"].includes(type)) return "#4a8fd0";
+  return "#7c8b99";
+}
+
+// Демонстрационное значение — то же, что показывает демо-режим прошивки.
+function demoValue(type, i){
+  if (["light","switch","valve"].includes(type)) return i % 2 ? "Выкл" : "Вкл";
+  if (type === "climate") return "Нагрев";
+  if (type === "cover")   return i % 2 ? "Закрыто" : "Открыто";
+  return ["23.4","231.7","95.5"][i % 3];
+}
+
+function render(){
+  // Вкладки страниц
+  $("pageTabs").innerHTML = "";
+  doc.pages.forEach((p, i) => {
+    const b = document.createElement("button");
+    b.textContent = p.title || p.id || ("стр. " + (i+1));
+    if (i === pageIx) b.className = "on";
+    b.onclick = () => { pageIx = i; cardIx = -1; render(); };
+    $("pageTabs").append(b);
+  });
+
+  const page = doc.pages[pageIx];
+  if (!page) return;
+
+  $("pTitle").value = page.title || "";
+  const [cols, rows] = page.grid || [2,3];
+  $("pCols").value = cols; $("pRows").value = rows;
+  $("tAccent").value = doc.theme?.accent || "#C2610C";
+  $("tAccentHex").value = doc.theme?.accent || "#C2610C";
+  $("tRadius").value = doc.theme?.radius ?? 16;
+  $("dThrottle").value = doc.defaults?.throttle ?? "1s";
+  $("dDeadband").value = doc.defaults?.deadband ?? 0.5;
+
+  // Экран: та же арифметика сетки, что в прошивке (отступ 12, зазор 12,
+  // шапка 46), пересчитанная из 720 в размер превью.
+  const S = 520 / 720;
+  const scr = $("screen");
+  scr.innerHTML = "";
+  const hasTitle = !!page.title;
+  if (hasTitle){
+    const t = document.createElement("div");
+    t.className = "title"; t.textContent = page.title;
+    t.style.color = doc.theme?.accent || "#C2610C";
+    scr.append(t);
+  }
+  const pad = 12, gap = 12, top = hasTitle ? 46 : pad;
+  const cw = (720 - 2*pad - (cols-1)*gap) / cols;
+  const ch = (720 - top - pad - (rows-1)*gap) / rows;
+  const radius = (doc.theme?.radius ?? 16) * S;
+
+  for (let i = 0; i < cols*rows; i++){
+    const card = page.cards[i];
+    const el = document.createElement("div");
+    const x = pad + (i % cols) * (cw + gap);
+    const y = top + Math.floor(i / cols) * (ch + gap);
+    el.style.left = (x*S)+"px"; el.style.top = (y*S)+"px";
+    el.style.width = (cw*S)+"px"; el.style.height = (ch*S)+"px";
+    el.style.borderRadius = radius+"px";
+
+    if (!card){
+      el.className = "card empty";
+      el.innerHTML = '<div class="n">+ карточка</div>';
+      el.onclick = () => { addCard(i); };
+    } else {
+      el.className = "card" + (i === cardIx ? " sel" : "");
+      const acc = accentFor(card.type);
+      el.style.borderColor = acc;
+      const val = demoValue(card.type, i);
+      const active = ["Вкл","Открыто","Нагрев"].includes(val);
+      if (active) el.style.background = acc + "33";
+      const unit = card.unit ? " " + card.unit : "";
+      const shown = /^[\d.]+$/.test(val) ? val + unit : val;
+      el.innerHTML =
+        '<div class="n">' + esc(card.label || card.entity || card.type) + '</div>' +
+        '<div class="v" style="color:'+acc+'">' + esc(shown) + '</div>' +
+        '<div class="s">' + (CONTROLLABLE.has(card.type) ? "нажмите, чтобы переключить"
+                                                         : esc(card.unit || "")) + '</div>';
+      el.onclick = () => { cardIx = i; render(); };
+    }
+    scr.append(el);
+  }
+
+  // Форма карточки
+  const c = page.cards[cardIx];
+  $("cardForm").style.display = c ? "block" : "none";
+  $("noCard").style.display = c ? "none" : "block";
+  if (c){
+    const sel = $("cType");
+    sel.innerHTML = TYPES.map(t => '<option'+(t===c.type?' selected':'')+'>'+t+'</option>').join("");
+    $("cEntity").value = c.entity || "";
+    $("cLabel").value  = c.label  || "";
+    $("cUnit").value   = c.unit   || "";
+    $("cDec").value    = c.decimals ?? 1;
+    $("cWarnAbove").value = c.warn_above ?? "";
+    $("cWarnBelow").value = c.warn_below ?? "";
+    $("numFields").style.display = NUMERIC.has(c.type) ? "block" : "none";
+  }
+
+  $("json").value = JSON.stringify(doc, null, 2);
+}
+
+const esc = s => String(s).replace(/[&<>"]/g, m =>
+  ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
+
+function addCard(slot){
+  const page = doc.pages[pageIx];
+  while (page.cards.length < slot) page.cards.push({type:"spacer"});
+  page.cards[slot] = {type:"sensor", entity:"", label:"", decimals:1};
+  cardIx = slot;
+  render();
+}
+
+// --- правки формы ---
+function bind(id, fn, ev="input"){ $(id).addEventListener(ev, fn); }
+
+bind("pTitle", e => { doc.pages[pageIx].title = e.target.value; render(); });
+bind("pCols",  e => { doc.pages[pageIx].grid = [clamp(+e.target.value,1,4), doc.pages[pageIx].grid[1]]; render(); });
+bind("pRows",  e => { doc.pages[pageIx].grid = [doc.pages[pageIx].grid[0], clamp(+e.target.value,1,4)]; render(); });
+bind("tAccent", e => { doc.theme.accent = e.target.value.toUpperCase(); render(); });
+bind("tAccentHex", e => { if(/^#[0-9a-f]{6}$/i.test(e.target.value)){ doc.theme.accent = e.target.value.toUpperCase(); render(); } });
+bind("tRadius", e => { doc.theme.radius = clamp(+e.target.value,0,48); render(); });
+bind("dThrottle", e => { doc.defaults.throttle = e.target.value; render(); });
+bind("dDeadband", e => { doc.defaults.deadband = +e.target.value; render(); });
+
+const cur = () => doc.pages[pageIx].cards[cardIx];
+bind("cType",   e => { cur().type = e.target.value; render(); }, "change");
+bind("cEntity", e => { cur().entity = e.target.value.trim(); render(); });
+bind("cLabel",  e => { cur().label = e.target.value; render(); });
+bind("cUnit",   e => { cur().unit = e.target.value; render(); });
+bind("cDec",    e => { cur().decimals = clamp(+e.target.value,0,3); render(); });
+bind("cWarnAbove", e => { const v=e.target.value; if(v==="") delete cur().warn_above; else cur().warn_above=+v; render(); });
+bind("cWarnBelow", e => { const v=e.target.value; if(v==="") delete cur().warn_below; else cur().warn_below=+v; render(); });
+
+$("delCard").onclick = () => { doc.pages[pageIx].cards.splice(cardIx,1); cardIx=-1; render(); };
+$("addPage").onclick = () => {
+  doc.pages.push({id:"page"+(doc.pages.length+1), title:"Новая", grid:[2,3], cards:[]});
+  pageIx = doc.pages.length-1; cardIx=-1; render();
+};
+$("delPage").onclick = () => {
+  if (doc.pages.length <= 1) return say("Последнюю страницу удалить нельзя", true);
+  doc.pages.splice(pageIx,1); pageIx = 0; cardIx=-1; render();
+};
+
+$("json").addEventListener("blur", e => {
+  try { doc = JSON.parse(e.target.value); pageIx=0; cardIx=-1; render(); say("JSON применён"); }
+  catch (err){ say("JSON не разобран: " + err.message, true); }
+});
+
+// --- обмен с панелью ---
+function say(msg, bad){
+  const s = $("status");
+  s.className = "status " + (bad ? "err" : "ok");
+  s.textContent = msg;
+}
+const base = () => {
+  let h = $("host").value.trim().replace(/^https?:\/\//,"");
+  if (!h) throw new Error("не указан адрес панели");
+  if (!h.includes(":")) h += ":8080";
+  return "http://" + h;
+};
+
+$("load").onclick = async () => {
+  try {
+    const r = await fetch(base()+"/layout.json", {cache:"no-store"});
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    doc = await r.json(); pageIx=0; cardIx=-1; render();
+    say("Загружено с панели");
+  } catch(e){ say("Не удалось загрузить: " + e.message, true); }
+};
+
+$("save").onclick = async () => {
+  try {
+    doc.revision = (doc.revision|0) + 1;
+    const r = await fetch(base()+"/layout.json", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify(doc)
+    });
+    const t = await r.text();
+    if (!r.ok) throw new Error("HTTP " + r.status + " " + t);
+    say("Отправлено. Панель ответила: " + t);
+    render();
+  } catch(e){ say("Не удалось отправить: " + e.message, true); }
+};
+
+$("fromFile").onclick = () => $("file").click();
+$("file").onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try { doc = JSON.parse(await f.text()); pageIx=0; cardIx=-1; render(); say("Файл загружен"); }
+  catch(err){ say("Файл не разобран: " + err.message, true); }
+};
+$("toFile").onclick = () => {
+  const b = new Blob([JSON.stringify(doc,null,2)], {type:"application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(b);
+  a.download = (doc.room || "layout") + ".layout.json";
+  a.click(); URL.revokeObjectURL(a.href);
+};
+
+$("host").value = localStorage.getItem("panel86.host") || "";
+$("host").addEventListener("change", e => {
+  try { localStorage.setItem("panel86.host", e.target.value); } catch(_){}
+});
+
+render();
+</script>
+</body>
+</html>
