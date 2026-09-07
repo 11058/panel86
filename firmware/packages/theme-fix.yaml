@@ -1,103 +1,18 @@
 # ---------------------------------------------------------------------------
-# Оформление страниц из кода.
+# То, чего тема LVGL не покрывает.
 #
-# ESPHome не даёт задать стиль странице LVGL в YAML, а у страницы, как
-# и у любого lv_obj, заливка по умолчанию светлая. Отсюда «выбрана тёмная
-# тема, а меню светлое». Задаём явно каждой странице.
+# Само оформление задаётся штатным блоком `lvgl: theme:` — он применяет
+# стили ко всем виджетам нужного типа при создании, а действие
+# `lvgl.theme.update` меняет их на лету и само вызывает
+# lv_obj_report_style_change(), перерисовывая уже созданные виджеты.
 #
-# Здесь же снимаются символы-стрелки у выпадающих списков: символ берётся
-# из шрифта самого списка, а у наших кириллических шрифтов таких глифов
-# нет — вместо стрелки выходил квадрат. Список и без стрелки понятен.
+# Здесь остаётся только то, что темой не выражается:
+#   - перенос статусной строки, клавиатуры и ловца касания на верхний слой;
+#   - показ и скрытие единственной клавиатуры;
+#   - заполнение виджетов настроек сохранёнными значениями.
 # ---------------------------------------------------------------------------
 
 script:
-  # Оформление ТЕКУЩЕЙ страницы.
-  #
-  # Вызывается из on_load каждой страницы, а не проходит по списку:
-  # список приходится дополнять при добавлении страницы, и рано или поздно
-  # про него забывают — так и вышло с расписанием, оно осталось белым.
-  # Страница, красящая себя сама, забыть себя не может.
-  - id: style_page
-    mode: single
-    then:
-      - lambda: |-
-          lv_obj_t *p = lv_screen_active();
-          if (p == nullptr) return;
-          const bool dark = id(panel_storage)->theme() != "light";
-          lv_obj_set_style_bg_color(p, lv_color_hex(dark ? 0x0B0F13 : 0xF2F4F6), LV_PART_MAIN);
-          lv_obj_set_style_bg_opa(p, LV_OPA_COVER, LV_PART_MAIN);
-          lv_obj_set_style_text_color(p, lv_color_hex(dark ? 0xE3E9EE : 0x141C24), LV_PART_MAIN);
-          lv_obj_scroll_to_y(p, 0, LV_ANIM_OFF);
-
-  # Оформление элементов, которые темой страницы не покрываются:
-  # выпадающие списки и ползунки рисуются своими частями.
-  - id: apply_theme
-    mode: single
-    then:
-      - lambda: |-
-          const bool dark = id(panel_storage)->theme() != "light";
-          const uint32_t CARD = dark ? 0x161C22 : 0xFFFFFF;
-          const uint32_t BG   = dark ? 0x0B0F13 : 0xF2F4F6;
-
-          // Красим ВСЕ страницы сразу при загрузке. Полагаться только
-          // на on_load нельзя: он срабатывает, когда страница уже
-          // отрисована, и первый показ выходит белым.
-          // Список генерируется tools/gen_page_list.py, чтобы не отставать
-          // от конфигов при добавлении новых страниц.
-          // НАЧАЛО СПИСКА СТРАНИЦ (генерируется tools/gen_page_list.py)
-          lv_obj_t *const pages[] = {
-            id(page_p0)->obj, id(page_layout)->obj, id(page_settings)->obj,
-            id(page_display)->obj, id(page_schedule)->obj, id(page_network)->obj,
-            id(page_netstat)->obj, id(page_time)->obj, id(page_about)->obj,
-            id(page_wifi_list)->obj, id(page_wifi_pass)->obj,
-          };
-          // КОНЕЦ СПИСКА СТРАНИЦ
-          int styled = 0, missing = 0;
-          for (lv_obj_t *pg : pages) {
-            if (pg == nullptr) { missing++; continue; }
-            lv_obj_set_style_bg_color(pg, lv_color_hex(BG), LV_PART_MAIN);
-            lv_obj_set_style_bg_opa(pg, LV_OPA_COVER, LV_PART_MAIN);
-            lv_obj_set_style_text_color(pg, lv_color_hex(dark ? 0xE3E9EE : 0x141C24), LV_PART_MAIN);
-            styled++;
-          }
-          ESP_LOGI("theme", "страниц покрашено %d, не существует на момент вызова %d",
-                   styled, missing);
-
-          const uint32_t INK  = dark ? 0xE3E9EE : 0x141C24;
-          const uint32_t INK2 = dark ? 0x9AA8B4 : 0x4E5D6B;
-
-          // Выпадающие списки: убрать символ-стрелку (в кириллических
-          // шрифтах такого глифа нет, выходил квадрат) и покрасить
-          // и кнопку, и всплывающий список — это разные объекты.
-          lv_obj_t *const drops[] = {
-            id(dd_theme)->obj, id(dd_time_src)->obj, id(dd_ntp)->obj,
-            id(dd_tz)->obj, id(dd_sync)->obj, id(dd_day)->obj, id(dd_night)->obj,
-          };
-          for (lv_obj_t *d : drops) {
-            if (d == nullptr) continue;
-            lv_dropdown_set_symbol(d, nullptr);
-            lv_obj_set_style_bg_color(d, lv_color_hex(CARD), LV_PART_MAIN);
-            lv_obj_set_style_bg_opa(d, LV_OPA_COVER, LV_PART_MAIN);
-            lv_obj_set_style_text_color(d, lv_color_hex(INK), LV_PART_MAIN);
-            lv_obj_set_style_border_color(d, lv_color_hex(INK2), LV_PART_MAIN);
-            lv_obj_t *list = lv_dropdown_get_list(d);
-            if (list != nullptr) {
-              lv_obj_set_style_bg_color(list, lv_color_hex(CARD), LV_PART_MAIN);
-              lv_obj_set_style_bg_opa(list, LV_OPA_COVER, LV_PART_MAIN);
-              lv_obj_set_style_text_color(list, lv_color_hex(INK), LV_PART_MAIN);
-              lv_obj_set_style_border_color(list, lv_color_hex(INK2), LV_PART_MAIN);
-            }
-          }
-
-          lv_obj_t *const sliders[] = { id(sld_bright), id(sld_sleep), id(sld_dim) };
-          for (lv_obj_t *sl : sliders) {
-            if (sl == nullptr) continue;
-            lv_obj_set_style_bg_color(sl, lv_color_hex(dark ? 0x2B353E : 0xD6DDE4), LV_PART_MAIN);
-            lv_obj_set_style_bg_color(sl, lv_color_hex(0xC2610C), LV_PART_INDICATOR);
-            lv_obj_set_style_bg_color(sl, lv_color_hex(0xE9A45C), LV_PART_KNOB);
-          }
-          ESP_LOGI("theme", "оформление применено: %s", dark ? "тёмное" : "светлое");
-
   # Статусная строка и клавиатура переносятся на верхний слой LVGL.
   #
   # Верхний слой рисуется поверх ЛЮБОЙ страницы, поэтому:
@@ -136,69 +51,40 @@ script:
 
           ESP_LOGI("theme", "статусная строка, клавиатура и ловец касания вынесены на верхний слой");
 
-  # Заполнить виджеты настроек сохранёнными значениями.
+  # Оформление того, что блок `theme:` не покрывает.
   #
-  # Без этого ползунки и списки показывают умолчания из YAML, а не то,
-  # что реально сохранено. Выглядит как «настройки не сохранились», и хуже:
-  # прикоснувшись к ползунку, пользователь записывает обратно умолчание
-  # поверх своего значения.
-  - id: load_settings_ui
+  # Выяснено по фотографиям панели: `theme:` применяется к obj, button,
+  # label и прочим виджетам, но НЕ к страницам — они остаются белыми.
+  # Отсюда вся история с белым фоном, которую я ошибочно списывал
+  # на тайминги. Плюс у ползунка тема красит только дорожку, а заполнение
+  # и ручка остаются стандартными синими.
+  #
+  # Вызывается и при загрузке, и при каждом входе в настройки: даже если
+  # на загрузке что-то не успело создаться, вход в раздел всё исправит.
+  - id: style_extras
     mode: single
     then:
       - lambda: |-
-          auto *ps = id(panel_storage);
+          const bool dark = id(panel_storage)->theme() != "light";
+          const uint32_t BG   = dark ? 0x0B0F13 : 0xF2F4F6;
+          const uint32_t INK  = dark ? 0xE3E9EE : 0x141C24;
+          const uint32_t CARD = dark ? 0x161C22 : 0xFFFFFF;
+          const uint32_t TRACK = dark ? 0x2B353E : 0xD6DDE4;
 
-          // Яркость
-          lv_slider_set_value(id(sld_bright), ps->brightness(), LV_ANIM_OFF);
-          lv_label_set_text_fmt(id(lbl_bright), "%d %%", ps->brightness());
-
-          // Яркость в спящем режиме
-          lv_slider_set_value(id(sld_dim), ps->sleep_brightness(), LV_ANIM_OFF);
-          lv_label_set_text_fmt(id(lbl_dim), "%d %%", ps->sleep_brightness());
-
-          // Время до засыпания: ползунок хранит индекс, а не миллисекунды
-          static const uint32_t SLEEP_MS[] = {0, 30000, 60000, 120000, 300000, 600000, 1800000};
-          static const char *const SLEEP_NAMES[] = {"никогда","30 с","1 мин","2 мин","5 мин","10 мин","30 мин"};
-          int si = 2;
-          for (int i = 0; i < 7; i++)
-            if (SLEEP_MS[i] == ps->sleep_after_ms()) { si = i; break; }
-          lv_slider_set_value(id(sld_sleep), si, LV_ANIM_OFF);
-          lv_label_set_text(id(lbl_sleep), SLEEP_NAMES[si]);
-
-          // Тема
-          lv_dropdown_set_selected(id(dd_theme)->obj, ps->theme() == "light" ? 1 : 0);
-
-          // Расписание
-          lv_dropdown_set_selected(id(dd_day)->obj, ps->day_start_hour());
-          lv_dropdown_set_selected(id(dd_night)->obj, ps->night_start_hour());
-          if (ps->day_always_on()) lv_obj_add_state(id(sw_day_on), LV_STATE_CHECKED);
-          else                     lv_obj_remove_state(id(sw_day_on), LV_STATE_CHECKED);
-          if (ps->night_off())     lv_obj_add_state(id(sw_night_off), LV_STATE_CHECKED);
-          else                     lv_obj_remove_state(id(sw_night_off), LV_STATE_CHECKED);
-          if (ps->wake_on_motion()) lv_obj_add_state(id(sw_motion), LV_STATE_CHECKED);
-          else                      lv_obj_remove_state(id(sw_motion), LV_STATE_CHECKED);
-
-          // Время
-          lv_dropdown_set_selected(id(dd_time_src)->obj, ps->time_source() == "sntp" ? 0 : 1);
-          static const char *const NTP[] = {"pool.ntp.org","ru.pool.ntp.org",
-                                            "time.cloudflare.com","time.google.com"};
-          for (int i = 0; i < 4; i++)
-            if (ps->ntp_server() == NTP[i]) { lv_dropdown_set_selected(id(dd_ntp)->obj, i); break; }
-          static const char *const SYNC[] = {"1h","6h","24h","never"};
-          for (int i = 0; i < 4; i++)
-            if (ps->sync_every() == SYNC[i]) { lv_dropdown_set_selected(id(dd_sync)->obj, i); break; }
-          // Часовой пояс: GMT-12..GMT+14, индекс = смещение + 12
-          {
-            const std::string &tz = ps->timezone();
-            int off = 0;
-            if (tz.size() > 3 && tz.compare(0, 3, "UTC") == 0)
-              off = -atoi(tz.c_str() + 3);   // в POSIX знак инвертирован
-            int idx = off + 12;
-            if (idx < 0) idx = 0;
-            if (idx > 26) idx = 26;
-            lv_dropdown_set_selected(id(dd_tz)->obj, idx);
+          lv_obj_t *const pages[] = {
+            id(page_p0)->obj, id(page_layout)->obj, id(page_settings)->obj,
+            id(page_netstat)->obj, id(page_wifi_list)->obj, id(page_wifi_pass)->obj,
+          };
+          int ok = 0, nul = 0;
+          for (lv_obj_t *pg : pages) {
+            if (pg == nullptr) { nul++; continue; }
+            lv_obj_set_style_bg_color(pg, lv_color_hex(BG), LV_PART_MAIN);
+            lv_obj_set_style_bg_opa(pg, LV_OPA_COVER, LV_PART_MAIN);
+            lv_obj_set_style_text_color(pg, lv_color_hex(INK), LV_PART_MAIN);
+            ok++;
           }
-          ESP_LOGI("theme", "виджеты настроек заполнены сохранёнными значениями");
+
+          ESP_LOGI("theme", "страниц покрашено %d, пустых указателей %d", ok, nul);
 
   # Показать клавиатуру для конкретного поля.
   - id: kb_show

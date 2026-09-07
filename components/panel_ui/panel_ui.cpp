@@ -45,6 +45,15 @@ void PanelUI::setup() {
   conf.format_if_mount_failed = true;  // первое включение: раздел пустой
   conf.dont_mount = false;
 
+  // Проверяем ДО монтирования, есть ли уже размеченная файловая система:
+  // format_if_mount_failed молча стирает раздел при сбое монтирования,
+  // и это выглядит как «настройки не сохраняются».
+  conf.dont_mount = true;
+  const bool premount_ok = esp_vfs_littlefs_register(&conf) == ESP_OK;
+  if (premount_ok)
+    esp_vfs_littlefs_unregister(this->partition_);
+  conf.dont_mount = false;
+
   esp_err_t err = esp_vfs_littlefs_register(&conf);
   if (err != ESP_OK) {
     ESP_LOGE(TAG, "LittleFS не смонтирован на разделе '%s': %s", this->partition_, esp_err_to_name(err));
@@ -52,6 +61,7 @@ void PanelUI::setup() {
     return;
   }
   this->mounted_ = true;
+  ESP_LOGI(TAG, "LittleFS: раздел %s размечен ранее", premount_ok ? "был" : "НЕ был (значит его отформатировали сейчас)");
 
   size_t used = 0, total = 0;
   if (this->fs_usage(&used, &total)) {
@@ -729,6 +739,60 @@ static void add_cors(httpd_req_t *req) {
 }
 
 // Предварительный запрос браузера перед POST с JSON.
+static esp_err_t handle_get_settings(httpd_req_t *req) {
+  auto *self = static_cast<PanelUI *>(req->user_ctx);
+  add_cors(req);
+  httpd_resp_set_type(req, "application/json");
+  const std::string data = self->read_settings();
+  if (data.empty()) {
+    httpd_resp_set_status(req, "404 Not Found");
+    return httpd_resp_sendstr(req, "{\"error\":\"настроек нет\"}");
+  }
+  return httpd_resp_send(req, data.c_str(), data.size());
+}
+
+static esp_err_t handle_post_settings(httpd_req_t *req) {
+  auto *self = static_cast<PanelUI *>(req->user_ctx);
+  add_cors(req);
+
+  static const size_t MAX_SETTINGS = 8 * 1024;
+  if (req->content_len == 0 || req->content_len > MAX_SETTINGS) {
+    httpd_resp_set_status(req, "413 Payload Too Large");
+    return httpd_resp_sendstr(req, "{\"error\":\"пустые или слишком большие настройки\"}");
+  }
+
+  std::string body;
+  body.reserve(req->content_len);
+  char buf[512];
+  size_t left = req->content_len;
+  while (left > 0) {
+    int got = httpd_req_recv(req, buf, std::min(left, sizeof(buf)));
+    if (got <= 0) {
+      httpd_resp_set_status(req, "400 Bad Request");
+      return httpd_resp_sendstr(req, "{\"error\":\"обрыв приёма\"}");
+    }
+    body.append(buf, got);
+    left -= got;
+  }
+
+  // Проверяем до записи: испорченный JSON не должен затирать рабочие
+  // настройки и оставить панель, например, с нулевой яркостью.
+  bool valid = json::parse_json(body, [](JsonObject doc) -> bool {
+    return !doc["display"].isNull() || !doc["time"].isNull();
+  });
+  if (!valid) {
+    httpd_resp_set_status(req, "422 Unprocessable Entity");
+    return httpd_resp_sendstr(req, "{\"error\":\"не разбирается или нет display/time\"}");
+  }
+
+  if (!self->write_settings(body)) {
+    httpd_resp_set_status(req, "500 Internal Server Error");
+    return httpd_resp_sendstr(req, "{\"error\":\"не удалось сохранить\"}");
+  }
+  httpd_resp_set_type(req, "application/json");
+  return httpd_resp_sendstr(req, "{\"saved\":true}");
+}
+
 static esp_err_t handle_options(httpd_req_t *req) {
   add_cors(req);
   httpd_resp_set_status(req, "204 No Content");
@@ -801,7 +865,7 @@ void PanelUI::start_http_() {
   cfg.server_port = this->http_port_;
   cfg.ctrl_port = this->http_port_ + 1000;  // иначе конфликт с web_server ESPHome
   cfg.lru_purge_enable = true;
-  cfg.max_uri_handlers = 6;
+  cfg.max_uri_handlers = 10;
   cfg.stack_size = 8192;
 
   httpd_handle_t server = nullptr;
@@ -818,6 +882,27 @@ void PanelUI::start_http_() {
   get_uri.handler = handle_get_layout;
   get_uri.user_ctx = this;
   httpd_register_uri_handler(server, &get_uri);
+
+  httpd_uri_t set_uri = {};
+  set_uri.uri = "/settings.json";
+  set_uri.method = HTTP_GET;
+  set_uri.handler = handle_get_settings;
+  set_uri.user_ctx = this;
+  httpd_register_uri_handler(server, &set_uri);
+
+  httpd_uri_t setpost_uri = {};
+  setpost_uri.uri = "/settings.json";
+  setpost_uri.method = HTTP_POST;
+  setpost_uri.handler = handle_post_settings;
+  setpost_uri.user_ctx = this;
+  httpd_register_uri_handler(server, &setpost_uri);
+
+  httpd_uri_t setopt_uri = {};
+  setopt_uri.uri = "/settings.json";
+  setopt_uri.method = HTTP_OPTIONS;
+  setopt_uri.handler = handle_options;
+  setopt_uri.user_ctx = this;
+  httpd_register_uri_handler(server, &setopt_uri);
 
   httpd_uri_t opt_uri = {};
   opt_uri.uri = "/layout.json";

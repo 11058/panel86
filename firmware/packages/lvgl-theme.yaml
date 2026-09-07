@@ -1,0 +1,195 @@
+# ---------------------------------------------------------------------------
+# Оформление интерфейса.
+#
+# Штатный механизм ESPHome: блок `theme:` задаёт стили для каждого типа
+# виджета, и они применяются в момент создания — то есть всё нарисовано
+# верно с первого показа, без гонок, подложек и покраски по списку страниц.
+#
+# Смена схемы на лету — действием `lvgl.theme.update`: оно правит те же
+# стили и само вызывает lv_obj_report_style_change(), перерисовывая уже
+# созданные виджеты. Этого не умеет lv_theme_default_init: тот применяется
+# только к новым объектам, поэтому переключать им тему бесполезно.
+#
+# ВАЖНО: `dark_mode` намеренно НЕ включён. Он поднимает встроенную тёмную
+# тему LVGL, которая красит виджеты при создании и действием
+# `lvgl.theme.update` не управляется. С ней тёмная схема выглядит хорошо
+# сама собой, но переключение на светлую почти ничего не меняет — видно
+# только то, что задано здесь. Поэтому обе схемы описаны целиком
+# и равноправно, а встроенная тема не участвует.
+# ---------------------------------------------------------------------------
+
+lvgl:
+  theme:
+    page:
+      bg_color: 0x0B0F13
+      bg_opa: COVER
+      text_color: 0xE3E9EE
+      text_font: f_body
+
+    obj:
+      bg_color: 0x161C22
+      bg_opa: COVER
+      border_color: 0x2B353E
+      border_width: 1
+      text_color: 0xE3E9EE
+      radius: 14
+
+    label:
+      text_color: 0xE3E9EE
+
+    button:
+      bg_color: 0x222B33
+      bg_opa: COVER
+      border_color: 0x3A4753
+      border_width: 1
+      text_color: 0xE3E9EE
+      radius: 12
+
+    dropdown:
+      bg_color: 0x161C22
+      bg_opa: COVER
+      border_color: 0x3A4753
+      border_width: 1
+      text_color: 0xE3E9EE
+      radius: 10
+
+    dropdown_list:
+      bg_color: 0x161C22
+      bg_opa: COVER
+      border_color: 0x3A4753
+      text_color: 0xE3E9EE
+      radius: 10
+
+    slider:
+      bg_color: 0x2B353E
+      bg_opa: COVER
+      radius: 12
+
+    switch:
+      bg_color: 0x2B353E
+      bg_opa: COVER
+
+    textarea:
+      bg_color: 0x0E1317
+      bg_opa: COVER
+      border_color: 0x3A4753
+      text_color: 0xE3E9EE
+
+    keyboard:
+      bg_color: 0x161C22
+      bg_opa: COVER
+      text_color: 0xE3E9EE
+
+    roller:
+      bg_color: 0x161C22
+      bg_opa: COVER
+      text_color: 0xE3E9EE
+
+# Переключение схемы на лету.
+#
+# Оба скрипта задают ОДИН И ТОТ ЖЕ набор свойств. Если в одной схеме
+# свойство задать, а в другой забыть — оно останется от предыдущей,
+# и получится смесь. Именно так выглядела первая попытка: у кнопок
+# менялись только рамки.
+script:
+  - id: theme_dark
+    mode: single
+    then:
+      - lvgl.theme.update:
+          page:
+            bg_color: 0x0B0F13
+            bg_opa: COVER
+            text_color: 0xE3E9EE
+          obj:
+            bg_color: 0x161C22
+            bg_opa: COVER
+            border_color: 0x2B353E
+            text_color: 0xE3E9EE
+          label:
+            text_color: 0xE3E9EE
+          button:
+            bg_color: 0x222B33
+            bg_opa: COVER
+            border_color: 0x3A4753
+            text_color: 0xE3E9EE
+          dropdown:
+            bg_color: 0x161C22
+            bg_opa: COVER
+            border_color: 0x3A4753
+            text_color: 0xE3E9EE
+          dropdown_list:
+            bg_color: 0x161C22
+            bg_opa: COVER
+            border_color: 0x3A4753
+            text_color: 0xE3E9EE
+          slider:
+            bg_color: 0x2B353E
+            bg_opa: COVER
+          switch:
+            bg_color: 0x2B353E
+            bg_opa: COVER
+          textarea:
+            bg_color: 0x0E1317
+            bg_opa: COVER
+            border_color: 0x3A4753
+            text_color: 0xE3E9EE
+          keyboard:
+            bg_color: 0x161C22
+            bg_opa: COVER
+            text_color: 0xE3E9EE
+          roller:
+            bg_color: 0x161C22
+            bg_opa: COVER
+            text_color: 0xE3E9EE
+      - logger.log: "схема оформления: тёмная"
+
+  - id: theme_light
+    mode: single
+    then:
+      - lvgl.theme.update:
+          page:
+            bg_color: 0xF2F4F6
+            bg_opa: COVER
+            text_color: 0x141C24
+          obj:
+            bg_color: 0xFFFFFF
+            bg_opa: COVER
+            border_color: 0xD6DDE4
+            text_color: 0x141C24
+          label:
+            text_color: 0x141C24
+          button:
+            bg_color: 0xE9EDF1
+            bg_opa: COVER
+            border_color: 0xC3CCD5
+            text_color: 0x141C24
+          dropdown:
+            bg_color: 0xFFFFFF
+            bg_opa: COVER
+            border_color: 0xC3CCD5
+            text_color: 0x141C24
+          dropdown_list:
+            bg_color: 0xFFFFFF
+            bg_opa: COVER
+            border_color: 0xC3CCD5
+            text_color: 0x141C24
+          slider:
+            bg_color: 0xD6DDE4
+            bg_opa: COVER
+          switch:
+            bg_color: 0xD6DDE4
+            bg_opa: COVER
+          textarea:
+            bg_color: 0xFFFFFF
+            bg_opa: COVER
+            border_color: 0xC3CCD5
+            text_color: 0x141C24
+          keyboard:
+            bg_color: 0xEDF0F3
+            bg_opa: COVER
+            text_color: 0x141C24
+          roller:
+            bg_color: 0xFFFFFF
+            bg_opa: COVER
+            text_color: 0x141C24
+      - logger.log: "схема оформления: светлая"

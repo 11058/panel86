@@ -8,8 +8,6 @@
 lvgl:
   pages:
     - id: page_layout
-      on_load:
-        - script.execute: style_page
       widgets:
         - obj:
             id: statusbar
@@ -62,6 +60,10 @@ lvgl:
                         align: CENTER
                         text_font: montserrat_20
                   on_click:
+                    # Оформление применяем при каждом входе: блок theme:
+                    # не покрывает страницы, а на загрузке что-то может
+                    # не успеть создаться.
+                    - script.execute: style_extras
                     - lvgl.page.show: page_settings
         # Ловец пробуждающего касания. Объявлен здесь, но при загрузке
         # переносится на верхний слой LVGL, чтобы работать на всех страницах.
