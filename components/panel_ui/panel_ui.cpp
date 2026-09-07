@@ -12,6 +12,7 @@
 #include "esp_http_server.h"
 
 #include "editor_html.h"
+#include "icons_mdi.h"
 
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
@@ -322,19 +323,25 @@ static void card_event_cb(lv_event_t *e) {
 // Символ для карточки. Берём встроенные символы LVGL, чтобы не тащить
 // в прошивку отдельный шрифт иконок: своих глифов у кириллических шрифтов
 // нет, а montserrat символы содержит.
-static const char *icon_for(const std::string &type) {
-  if (type == "light")        return LV_SYMBOL_CHARGE;
-  if (type == "switch")       return LV_SYMBOL_POWER;
-  if (type == "climate")      return LV_SYMBOL_WARNING;
-  if (type == "valve")        return LV_SYMBOL_REFRESH;
-  if (type == "cover")        return LV_SYMBOL_DOWNLOAD;
-  if (type == "media")        return LV_SYMBOL_PLAY;
-  if (type == "camera")       return LV_SYMBOL_IMAGE;
-  if (type == "lock")         return LV_SYMBOL_CLOSE;
-  if (type == "scene" ||
-      type == "script")       return LV_SYMBOL_OK;
-  if (type == "sensor")       return LV_SYMBOL_LIST;
-  return LV_SYMBOL_DUMMY;
+// Иконка карточки. Своя из раскладки имеет приоритет, иначе разумная
+// по типу — чтобы карточка выглядела осмысленно сразу после добавления.
+static const char *icon_for(const std::string &type, const std::string &custom) {
+  if (const char *own = icon_by_name(custom.c_str()))
+    return own;
+  const char *name = "dots-horizontal";
+  if (type == "light")   name = "lightbulb";
+  else if (type == "switch")  name = "toggle-switch";
+  else if (type == "climate") name = "radiator";
+  else if (type == "valve")   name = "valve";
+  else if (type == "cover")   name = "window-shutter";
+  else if (type == "media")   name = "play";
+  else if (type == "camera")  name = "cctv";
+  else if (type == "lock")    name = "lock";
+  else if (type == "scene")   name = "movie-open";
+  else if (type == "script")  name = "script-text";
+  else if (type == "sensor")  name = "gauge";
+  const char *r = icon_by_name(name);
+  return r != nullptr ? r : "";
 }
 
 void PanelUI::render_card_(void *parent, Card *card, int x, int y, int w, int h) {
@@ -354,6 +361,13 @@ void PanelUI::render_card_(void *parent, Card *card, int x, int y, int w, int h)
   lv_obj_set_style_bg_opa(box, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_pad_all(box, 0, LV_PART_MAIN);
   lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
+
+  // Плавный переход цвета при смене состояния. Резкий скачок читается
+  // как мигание и заставляет глаз возвращаться к карточке.
+  static lv_style_transition_dsc_t tr;
+  static const lv_style_prop_t tr_props[] = {LV_STYLE_BG_COLOR, LV_STYLE_BG_OPA, LV_STYLE_PROP_INV};
+  lv_style_transition_dsc_init(&tr, tr_props, lv_anim_path_ease_out, 260, 0, nullptr);
+  lv_obj_set_style_transition(box, &tr, LV_PART_MAIN);
 
   // Заливка по уровню: у света ширина полосы показывает яркость прямо
   // на карточке, как в Bubble Card. Лежит под содержимым.
@@ -377,7 +391,7 @@ void PanelUI::render_card_(void *parent, Card *card, int x, int y, int w, int h)
   lv_obj_set_style_bg_opa(ibox, LV_OPA_20, LV_PART_MAIN);
 
   lv_obj_t *icon = lv_label_create(ibox);
-  lv_label_set_text(icon, icon_for(card->type));
+  lv_label_set_text(icon, icon_for(card->type, card->icon_name));
   lv_obj_center(icon);
   lv_obj_set_style_text_color(icon, accent, LV_PART_MAIN);
   if (this->font_icon_ != nullptr)
@@ -444,8 +458,23 @@ void PanelUI::update_card_level_(Card *card, int level) {
   }
   const int w = lv_obj_get_width(box);
   lv_obj_remove_flag(fill, LV_OBJ_FLAG_HIDDEN);
-  // Плавно: скачок ширины на каждом обновлении яркости выглядит дёрганым.
-  lv_obj_set_width(fill, w * level / 100);
+
+  // Плавно: скачок ширины на каждом обновлении яркости выглядит дёрганым,
+  // особенно когда яркость меняют ползунком и значения идут потоком.
+  const int target = w * level / 100;
+  const int now = lv_obj_get_width(fill);
+  if (now == target)
+    return;
+  lv_anim_t a;
+  lv_anim_init(&a);
+  lv_anim_set_var(&a, fill);
+  lv_anim_set_values(&a, now, target);
+  lv_anim_set_time(&a, 240);
+  lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+  lv_anim_set_exec_cb(&a, [](void *o, int32_t v) {
+    lv_obj_set_width(static_cast<lv_obj_t *>(o), v);
+  });
+  lv_anim_start(&a);
 }
 
 // Человеческое представление состояния: «on» на настенной панели читается
@@ -640,6 +669,7 @@ void PanelUI::render_page_(void *tile, const void *page_json, int w, int h) {
     card->entity = jc["entity"] | "";
     card->label = jc["label"] | "";
     card->unit = jc["unit"] | "";
+    card->icon_name = std::string(jc["icon"] | "");
     card->decimals = jc["decimals"] | 1;
     if (card->label.empty())
       card->label = card->entity.empty() ? card->type : card->entity;
@@ -678,6 +708,39 @@ void PanelUI::render_page_(void *tile, const void *page_json, int w, int h) {
     const int pw = card->span_w * cw + (card->span_w - 1) * gap;
     const int ph = card->span_h * ch + (card->span_h - 1) * gap;
     this->render_card_(par, card, px, py, pw, ph);
+
+    // Появление: карточка выезжает снизу и проявляется, с задержкой
+    // по порядку. Страница «собирается» на глазах, а не возникает разом —
+    // так понятнее, из чего она состоит.
+    {
+      auto *bx = static_cast<lv_obj_t *>(card->box);
+      const uint32_t delay = 40 * static_cast<uint32_t>(this->cards_.size());
+      lv_obj_set_style_opa(bx, LV_OPA_TRANSP, LV_PART_MAIN);
+
+      lv_anim_t a;
+      lv_anim_init(&a);
+      lv_anim_set_var(&a, bx);
+      lv_anim_set_values(&a, py + 26, py);
+      lv_anim_set_time(&a, 320);
+      lv_anim_set_delay(&a, delay);
+      lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+      lv_anim_set_exec_cb(&a, [](void *o, int32_t v) {
+        lv_obj_set_y(static_cast<lv_obj_t *>(o), v);
+      });
+      lv_anim_start(&a);
+
+      lv_anim_t f;
+      lv_anim_init(&f);
+      lv_anim_set_var(&f, bx);
+      lv_anim_set_values(&f, LV_OPA_TRANSP, LV_OPA_COVER);
+      lv_anim_set_time(&f, 300);
+      lv_anim_set_delay(&f, delay);
+      lv_anim_set_exec_cb(&f, [](void *o, int32_t v) {
+        lv_obj_set_style_opa(static_cast<lv_obj_t *>(o), static_cast<lv_opa_t>(v), LV_PART_MAIN);
+      });
+      lv_anim_start(&f);
+    }
+
     this->cards_.push_back(card);
   }
 }

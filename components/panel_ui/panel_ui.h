@@ -97,6 +97,7 @@ class PanelUI : public Component {
     std::string entity;
     std::string label;
     std::string unit;
+    std::string icon_name;
     int decimals{1};
     int span_w{1};
     int span_h{1};

@@ -21,6 +21,7 @@ esphome:
   includes:
     - lwip_dns_shim.h
     - editor_html.h
+    - icons_mdi.h
   friendly_name: ${friendly_name}
   min_version: 2026.7.0
   on_boot:
@@ -51,9 +52,9 @@ esphome:
             id(panel_storage)->set_fonts(id(f_title)->get_lv_font(),
                                          id(f_body)->get_lv_font(),
                                          id(f_small)->get_lv_font(),
-                                         // Символы карточек живут в montserrat:
-                                         // в кириллических шрифтах таких глифов нет.
-                                         &lv_font_montserrat_28);
+                                         // Иконки Material Design Icons —
+                                         // те же имена, что в Home Assistant.
+                                         id(f_icon)->get_lv_font());
         - if:
             condition:
               lambda: 'return wifi::global_wifi_component->has_sta();'
