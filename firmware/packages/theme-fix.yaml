@@ -52,12 +52,16 @@ script:
             id(page_wifi_list)->obj, id(page_wifi_pass)->obj,
           };
           // КОНЕЦ СПИСКА СТРАНИЦ
+          int styled = 0, missing = 0;
           for (lv_obj_t *pg : pages) {
-            if (pg == nullptr) continue;
+            if (pg == nullptr) { missing++; continue; }
             lv_obj_set_style_bg_color(pg, lv_color_hex(BG), LV_PART_MAIN);
             lv_obj_set_style_bg_opa(pg, LV_OPA_COVER, LV_PART_MAIN);
             lv_obj_set_style_text_color(pg, lv_color_hex(dark ? 0xE3E9EE : 0x141C24), LV_PART_MAIN);
+            styled++;
           }
+          ESP_LOGI("theme", "страниц покрашено %d, не существует на момент вызова %d",
+                   styled, missing);
 
           const uint32_t INK  = dark ? 0xE3E9EE : 0x141C24;
           const uint32_t INK2 = dark ? 0x9AA8B4 : 0x4E5D6B;
@@ -131,6 +135,70 @@ script:
           lv_obj_move_foreground(id(kb_wifi)->obj);
 
           ESP_LOGI("theme", "статусная строка, клавиатура и ловец касания вынесены на верхний слой");
+
+  # Заполнить виджеты настроек сохранёнными значениями.
+  #
+  # Без этого ползунки и списки показывают умолчания из YAML, а не то,
+  # что реально сохранено. Выглядит как «настройки не сохранились», и хуже:
+  # прикоснувшись к ползунку, пользователь записывает обратно умолчание
+  # поверх своего значения.
+  - id: load_settings_ui
+    mode: single
+    then:
+      - lambda: |-
+          auto *ps = id(panel_storage);
+
+          // Яркость
+          lv_slider_set_value(id(sld_bright), ps->brightness(), LV_ANIM_OFF);
+          lv_label_set_text_fmt(id(lbl_bright), "%d %%", ps->brightness());
+
+          // Яркость в спящем режиме
+          lv_slider_set_value(id(sld_dim), ps->sleep_brightness(), LV_ANIM_OFF);
+          lv_label_set_text_fmt(id(lbl_dim), "%d %%", ps->sleep_brightness());
+
+          // Время до засыпания: ползунок хранит индекс, а не миллисекунды
+          static const uint32_t SLEEP_MS[] = {0, 30000, 60000, 120000, 300000, 600000, 1800000};
+          static const char *const SLEEP_NAMES[] = {"никогда","30 с","1 мин","2 мин","5 мин","10 мин","30 мин"};
+          int si = 2;
+          for (int i = 0; i < 7; i++)
+            if (SLEEP_MS[i] == ps->sleep_after_ms()) { si = i; break; }
+          lv_slider_set_value(id(sld_sleep), si, LV_ANIM_OFF);
+          lv_label_set_text(id(lbl_sleep), SLEEP_NAMES[si]);
+
+          // Тема
+          lv_dropdown_set_selected(id(dd_theme)->obj, ps->theme() == "light" ? 1 : 0);
+
+          // Расписание
+          lv_dropdown_set_selected(id(dd_day)->obj, ps->day_start_hour());
+          lv_dropdown_set_selected(id(dd_night)->obj, ps->night_start_hour());
+          if (ps->day_always_on()) lv_obj_add_state(id(sw_day_on), LV_STATE_CHECKED);
+          else                     lv_obj_remove_state(id(sw_day_on), LV_STATE_CHECKED);
+          if (ps->night_off())     lv_obj_add_state(id(sw_night_off), LV_STATE_CHECKED);
+          else                     lv_obj_remove_state(id(sw_night_off), LV_STATE_CHECKED);
+          if (ps->wake_on_motion()) lv_obj_add_state(id(sw_motion), LV_STATE_CHECKED);
+          else                      lv_obj_remove_state(id(sw_motion), LV_STATE_CHECKED);
+
+          // Время
+          lv_dropdown_set_selected(id(dd_time_src)->obj, ps->time_source() == "sntp" ? 0 : 1);
+          static const char *const NTP[] = {"pool.ntp.org","ru.pool.ntp.org",
+                                            "time.cloudflare.com","time.google.com"};
+          for (int i = 0; i < 4; i++)
+            if (ps->ntp_server() == NTP[i]) { lv_dropdown_set_selected(id(dd_ntp)->obj, i); break; }
+          static const char *const SYNC[] = {"1h","6h","24h","never"};
+          for (int i = 0; i < 4; i++)
+            if (ps->sync_every() == SYNC[i]) { lv_dropdown_set_selected(id(dd_sync)->obj, i); break; }
+          // Часовой пояс: GMT-12..GMT+14, индекс = смещение + 12
+          {
+            const std::string &tz = ps->timezone();
+            int off = 0;
+            if (tz.size() > 3 && tz.compare(0, 3, "UTC") == 0)
+              off = -atoi(tz.c_str() + 3);   // в POSIX знак инвертирован
+            int idx = off + 12;
+            if (idx < 0) idx = 0;
+            if (idx > 26) idx = 26;
+            lv_dropdown_set_selected(id(dd_tz)->obj, idx);
+          }
+          ESP_LOGI("theme", "виджеты настроек заполнены сохранёнными значениями");
 
   # Показать клавиатуру для конкретного поля.
   - id: kb_show

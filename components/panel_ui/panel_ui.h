@@ -58,6 +58,8 @@ class PanelUI : public Component {
   const std::string &theme() const { return this->s_theme_; }
   const std::string &time_source() const { return this->s_time_source_; }
   const std::string &ntp_server() const { return this->s_ntp_server_; }
+  const std::string &timezone() const { return this->s_timezone_; }
+  const std::string &sync_every() const { return this->s_sync_every_; }
 
   /// Изменить одну настройку и сразу сохранить. Значение — как в JSON.
   bool set_setting(const std::string &group, const std::string &key, const std::string &value);
@@ -167,7 +169,8 @@ class PanelUI : public Component {
   std::string s_theme_{"dark"};
   std::string s_time_source_{"sntp"};
   std::string s_ntp_server_{"pool.ntp.org"};
-  std::string s_timezone_{"Asia/Yekaterinburg"};
+  std::string s_timezone_{"UTC-5"};
+  std::string s_sync_every_{"6h"};
 };
 
 }  // namespace panel_ui

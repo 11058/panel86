@@ -221,7 +221,8 @@ void PanelUI::load_settings() {
     if (!t.isNull()) {
       this->s_time_source_ = std::string(t["source"] | "sntp");
       this->s_ntp_server_ = std::string(t["server"] | "pool.ntp.org");
-      this->s_timezone_ = std::string(t["timezone"] | "Asia/Yekaterinburg");
+      this->s_timezone_ = std::string(t["timezone"] | "UTC-5");
+      this->s_sync_every_ = std::string(t["sync_every"] | "6h");
     }
     return true;
   });

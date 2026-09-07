@@ -19,6 +19,20 @@ lvgl:
       on_load:
         - script.execute: style_page
       widgets:
+        # Подложка. Фон страницы можно задать стилем, но он применяется
+        # с опозданием: первый показ успевает выйти белым. Обычный
+        # прямоугольник первым в списке виджетов рисуется всегда и вовремя.
+        - obj:
+            x: 0
+            y: 0
+            width: 720
+            height: 720
+            radius: 0
+            border_width: 0
+            pad_all: 0
+            bg_color: 0x0B0F13
+            bg_opa: COVER
+            scrollable: false
         - label:
             text: "Настройки"
             align: TOP_MID
@@ -132,6 +146,20 @@ lvgl:
       on_load:
         - script.execute: style_page
       widgets:
+        # Подложка. Фон страницы можно задать стилем, но он применяется
+        # с опозданием: первый показ успевает выйти белым. Обычный
+        # прямоугольник первым в списке виджетов рисуется всегда и вовремя.
+        - obj:
+            x: 0
+            y: 0
+            width: 720
+            height: 720
+            radius: 0
+            border_width: 0
+            pad_all: 0
+            bg_color: 0x0B0F13
+            bg_opa: COVER
+            scrollable: false
         - label: { text: "Экран", align: TOP_MID, y: 64, text_font: f_title, text_color: 0xE3E9EE }
         - button:
             align: TOP_LEFT
@@ -241,6 +269,20 @@ lvgl:
       on_load:
         - script.execute: style_page
       widgets:
+        # Подложка. Фон страницы можно задать стилем, но он применяется
+        # с опозданием: первый показ успевает выйти белым. Обычный
+        # прямоугольник первым в списке виджетов рисуется всегда и вовремя.
+        - obj:
+            x: 0
+            y: 0
+            width: 720
+            height: 720
+            radius: 0
+            border_width: 0
+            pad_all: 0
+            bg_color: 0x0B0F13
+            bg_opa: COVER
+            scrollable: false
         - label: { text: "Расписание", align: TOP_MID, y: 64, text_font: f_title, text_color: 0xE3E9EE }
         - button:
             align: TOP_LEFT
@@ -361,6 +403,20 @@ lvgl:
       on_load:
         - script.execute: style_page
       widgets:
+        # Подложка. Фон страницы можно задать стилем, но он применяется
+        # с опозданием: первый показ успевает выйти белым. Обычный
+        # прямоугольник первым в списке виджетов рисуется всегда и вовремя.
+        - obj:
+            x: 0
+            y: 0
+            width: 720
+            height: 720
+            radius: 0
+            border_width: 0
+            pad_all: 0
+            bg_color: 0x0B0F13
+            bg_opa: COVER
+            scrollable: false
         - label:
             text: "Сеть"
             align: TOP_MID
@@ -417,6 +473,20 @@ lvgl:
       on_load:
         - script.execute: style_page
       widgets:
+        # Подложка. Фон страницы можно задать стилем, но он применяется
+        # с опозданием: первый показ успевает выйти белым. Обычный
+        # прямоугольник первым в списке виджетов рисуется всегда и вовремя.
+        - obj:
+            x: 0
+            y: 0
+            width: 720
+            height: 720
+            radius: 0
+            border_width: 0
+            pad_all: 0
+            bg_color: 0x0B0F13
+            bg_opa: COVER
+            scrollable: false
         - label:
             text: "Состояние сети"
             align: TOP_MID
@@ -448,6 +518,20 @@ lvgl:
       on_load:
         - script.execute: style_page
       widgets:
+        # Подложка. Фон страницы можно задать стилем, но он применяется
+        # с опозданием: первый показ успевает выйти белым. Обычный
+        # прямоугольник первым в списке виджетов рисуется всегда и вовремя.
+        - obj:
+            x: 0
+            y: 0
+            width: 720
+            height: 720
+            radius: 0
+            border_width: 0
+            pad_all: 0
+            bg_color: 0x0B0F13
+            bg_opa: COVER
+            scrollable: false
         - label:
             text: "Время"
             align: TOP_MID
@@ -608,6 +692,20 @@ lvgl:
       on_load:
         - script.execute: style_page
       widgets:
+        # Подложка. Фон страницы можно задать стилем, но он применяется
+        # с опозданием: первый показ успевает выйти белым. Обычный
+        # прямоугольник первым в списке виджетов рисуется всегда и вовремя.
+        - obj:
+            x: 0
+            y: 0
+            width: 720
+            height: 720
+            radius: 0
+            border_width: 0
+            pad_all: 0
+            bg_color: 0x0B0F13
+            bg_opa: COVER
+            scrollable: false
         - label:
             text: "О панели"
             align: TOP_MID
