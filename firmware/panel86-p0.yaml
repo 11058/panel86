@@ -49,9 +49,11 @@ esphome:
               - script.execute: theme_light
         - lambda: |-
             id(panel_storage)->set_root(id(ui_root));
-            id(panel_storage)->set_fonts(id(f_title)->get_lv_font(),
-                                         id(f_body)->get_lv_font(),
-                                         id(f_small)->get_lv_font(),
+            const std::string fs = id(panel_storage)->font_scale();
+            id(panel_storage)->set_fonts(
+                (fs == "small" ? id(f_title_s) : fs == "large" ? id(f_title_l) : id(f_title))->get_lv_font(),
+                (fs == "small" ? id(f_body_s)  : fs == "large" ? id(f_body_l)  : id(f_body))->get_lv_font(),
+                (fs == "small" ? id(f_small_s) : fs == "large" ? id(f_small_l) : id(f_small))->get_lv_font(),
                                          // Иконки Material Design Icons —
                                          // те же имена, что в Home Assistant.
                                          id(f_icon)->get_lv_font());
@@ -221,8 +223,28 @@ button:
 # Встроенные montserrat_* содержат только латиницу — весь русский текст
 # на экране превращается в квадратики. Найдено на живой плате.
 # Кириллицу даёт glyphsets: GF_Cyrillic_Core (241 глиф) + GF_Latin_Core.
+#
+# Три набора размеров: мелкий, обычный, крупный. В ESPHome размер задаётся
+# при сборке, поэтому «регулировать шрифт» — это выбирать из готовых
+# наборов, а не менять число. Цена — около 90 КБ флеша на набор; при 29 %
+# занятого раздела это приемлемо, зато размер меняется без перепрошивки.
 # --------------------------------------------------------------------------
 font:
+  - file: "gfonts://Roboto@500"
+    id: f_title_s
+    size: 24
+    bpp: 4
+    glyphsets: [GF_Latin_Core, GF_Cyrillic_Core]
+  - file: "gfonts://Roboto@400"
+    id: f_body_s
+    size: 18
+    bpp: 4
+    glyphsets: [GF_Latin_Core, GF_Cyrillic_Core]
+  - file: "gfonts://Roboto@400"
+    id: f_small_s
+    size: 14
+    bpp: 4
+    glyphsets: [GF_Latin_Core, GF_Cyrillic_Core]
   - file: "gfonts://Roboto@500"
     id: f_title
     size: 30
@@ -236,6 +258,21 @@ font:
   - file: "gfonts://Roboto@400"
     id: f_small
     size: 17
+    bpp: 4
+    glyphsets: [GF_Latin_Core, GF_Cyrillic_Core]
+  - file: "gfonts://Roboto@500"
+    id: f_title_l
+    size: 38
+    bpp: 4
+    glyphsets: [GF_Latin_Core, GF_Cyrillic_Core]
+  - file: "gfonts://Roboto@400"
+    id: f_body_l
+    size: 28
+    bpp: 4
+    glyphsets: [GF_Latin_Core, GF_Cyrillic_Core]
+  - file: "gfonts://Roboto@400"
+    id: f_small_l
+    size: 21
     bpp: 4
     glyphsets: [GF_Latin_Core, GF_Cyrillic_Core]
 

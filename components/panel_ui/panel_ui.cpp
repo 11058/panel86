@@ -16,6 +16,10 @@
 
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
+
+#include <array>
+#include <initializer_list>
+#include <utility>
 #include "lwip/dns.h"
 #include "lwip/ip_addr.h"
 
@@ -225,6 +229,59 @@ bool PanelUI::write_settings(const std::string &data) {
   return true;
 }
 
+// Чтение и запись учётных данных HA. Токен хранится на панели по прямой
+// просьбе владельца: иначе он теряется при каждой смене браузера
+// или очистке хранилища, и список сущностей приходится подключать заново.
+// В ответах наружу токен НЕ отдаётся — только признак, что он задан.
+static std::string read_file_(const std::string &path) {
+  FILE *f = fopen(path.c_str(), "rb");
+  if (f == nullptr)
+    return {};
+  std::string out;
+  char buf[512];
+  size_t n;
+  while ((n = fread(buf, 1, sizeof(buf), f)) > 0)
+    out.append(buf, n);
+  fclose(f);
+  return out;
+}
+
+std::string PanelUI::ha_url() {
+  std::string url;
+  json::parse_json(read_file_(std::string(this->base_path_) + "/" + this->ha_file_),
+                   [&](JsonObject o) -> bool { url = std::string(o["url"] | ""); return true; });
+  return url;
+}
+
+std::string PanelUI::ha_token() {
+  std::string tok;
+  json::parse_json(read_file_(std::string(this->base_path_) + "/" + this->ha_file_),
+                   [&](JsonObject o) -> bool { tok = std::string(o["token"] | ""); return true; });
+  return tok;
+}
+
+bool PanelUI::save_ha(const std::string &url, const std::string &token) {
+  if (!this->mounted_)
+    return false;
+  const std::string path = std::string(this->base_path_) + "/" + this->ha_file_;
+  const std::string tmp = path + ".tmp";
+  std::string body = "{\"url\":\"" + url + "\",\"token\":\"" + token + "\"}";
+  FILE *f = fopen(tmp.c_str(), "wb");
+  if (f == nullptr)
+    return false;
+  const size_t written = fwrite(body.data(), 1, body.size(), f);
+  fclose(f);
+  if (written != body.size()) {
+    remove(tmp.c_str());
+    return false;
+  }
+  remove(path.c_str());
+  if (rename(tmp.c_str(), path.c_str()) != 0)
+    return false;
+  ESP_LOGI(TAG, "учётные данные Home Assistant сохранены (%s)", url.c_str());
+  return true;
+}
+
 void PanelUI::load_settings() {
   const std::string data = this->read_settings();
   if (data.empty()) {
@@ -239,6 +296,7 @@ void PanelUI::load_settings() {
       this->s_sleep_after_ms_ = parse_ms(d["sleep_after"] | "60s");
       this->s_wake_on_motion_ = d["wake_on_motion"] | true;
       this->s_theme_ = std::string(d["theme"] | "dark");
+      this->s_font_scale_ = std::string(d["font_scale"] | "normal");
       this->s_day_start_ = d["day_start"] | 7;
       this->s_night_start_ = d["night_start"] | 23;
       this->s_day_always_on_ = d["day_always_on"] | false;
@@ -1110,92 +1168,115 @@ void PanelUI::build_details_controls(void *sheet_v, Card *card, int width) {
   const int Y0 = 120;
   const int BH = 78;
   const std::string dom = card->entity.substr(0, card->entity.find('.'));
+  const lv_color_t acc = accent_for(card->type);
+
+  // Заголовок раздела внутри подробностей.
+  auto caption = [&](const char *text, int y) {
+    lv_obj_t *c = lv_label_create(sheet);
+    lv_label_set_text(c, text);
+    lv_obj_set_pos(c, 0, y);
+    lv_obj_set_style_text_color(c, lv_color_hex(card_ink2()), LV_PART_MAIN);
+    if (this->font_small_ != nullptr)
+      lv_obj_set_style_text_font(c, static_cast<const lv_font_t *>(this->font_small_), LV_PART_MAIN);
+  };
+
+  auto slider = [&](int y, int lo, int hi, int val, const char *service, const char *key) {
+    lv_obj_t *sl = lv_slider_create(sheet);
+    lv_obj_set_size(sl, width, 46);
+    lv_obj_set_pos(sl, 0, y);
+    lv_slider_set_range(sl, lo, hi);
+    lv_slider_set_value(sl, val, LV_ANIM_OFF);
+    lv_obj_set_style_radius(sl, 23, LV_PART_MAIN);
+    lv_obj_set_style_radius(sl, 23, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(sl, acc, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(sl, acc, LV_PART_KNOB);
+    auto *a2 = new SheetAction{this, service, key, ""};  // NOLINT
+    lv_obj_add_event_cb(sl, sheet_slider_cb, LV_EVENT_RELEASED, a2);
+    lv_obj_add_event_cb(sl, sheet_action_free_cb, LV_EVENT_DELETE, a2);
+    return sl;
+  };
+
+  // Ряд кнопок в одну строку, ширина делится поровну.
+  auto row = [&](int y, std::initializer_list<std::pair<const char *, std::array<std::string, 3>>> items) {
+    const int n = static_cast<int>(items.size());
+    const int bw = (width - 16 * (n - 1)) / n;
+    int i = 0;
+    for (const auto &it : items) {
+      const auto &a3 = it.second;
+      sheet_button(sheet, this, it.first, i * (bw + 16), y, bw, BH, a3[0],
+                   a3[1].empty() ? nullptr : a3[1].c_str(), a3[2], this->font_value_);
+      i++;
+    }
+  };
 
   if (card->type == "light") {
-    // Яркость — главное, ради чего сюда заходят.
-    lv_obj_t *cap = lv_label_create(sheet);
-    lv_label_set_text(cap, "Яркость");
-    lv_obj_set_pos(cap, 0, Y0);
-    lv_obj_set_style_text_color(cap, lv_color_hex(card_ink2()), LV_PART_MAIN);
-    if (this->font_small_ != nullptr)
-      lv_obj_set_style_text_font(cap, static_cast<const lv_font_t *>(this->font_small_), LV_PART_MAIN);
+    caption("Яркость", Y0);
+    slider(Y0 + 34, 1, 100, card->level > 0 ? card->level : 50, "light.turn_on", "brightness_pct");
+    caption("Оттенок белого", Y0 + 104);
+    slider(Y0 + 138, 2000, 6500, 3000, "light.turn_on", "kelvin");
+    row(Y0 + 208, {{"Включить", {"light.turn_on", "", ""}},
+                   {"Выключить", {"light.turn_off", "", ""}}});
 
-    lv_obj_t *sl = lv_slider_create(sheet);
-    lv_obj_set_size(sl, width, 46);
-    lv_obj_set_pos(sl, 0, Y0 + 34);
-    lv_slider_set_range(sl, 1, 100);
-    lv_slider_set_value(sl, card->level > 0 ? card->level : 50, LV_ANIM_OFF);
-    lv_obj_set_style_radius(sl, 23, LV_PART_MAIN);
-    lv_obj_set_style_radius(sl, 23, LV_PART_INDICATOR);
-    lv_obj_set_style_bg_color(sl, accent_for(card->type), LV_PART_INDICATOR);
-    auto *a = new SheetAction{this, "light.turn_on", "brightness_pct", ""};  // NOLINT
-    lv_obj_add_event_cb(sl, sheet_slider_cb, LV_EVENT_RELEASED, a);
-    lv_obj_add_event_cb(sl, sheet_action_free_cb, LV_EVENT_DELETE, a);
+  } else if (card->type == "switch" || card->type == "valve") {
+    row(Y0, {{"Включить", {dom + ".turn_on", "", ""}},
+             {"Выключить", {dom + ".turn_off", "", ""}}});
+    caption("Нажатие на карточку переключает состояние", Y0 + BH + 20);
 
-    const int bw = (width - 16) / 2;
-    sheet_button(sheet, this, "Включить", 0, Y0 + 108, bw, BH, "light.turn_on", nullptr, "",
-                 this->font_value_);
-    sheet_button(sheet, this, "Выключить", bw + 16, Y0 + 108, bw, BH, "light.turn_off", nullptr, "",
-                 this->font_value_);
-
-  } else if (card->type == "switch" || card->type == "valve" || card->type == "lock") {
-    const int bw = (width - 16) / 2;
-    const std::string on = dom + (card->type == "lock" ? ".unlock" : ".turn_on");
-    const std::string off = dom + (card->type == "lock" ? ".lock" : ".turn_off");
-    sheet_button(sheet, this, card->type == "lock" ? "Открыть" : "Включить", 0, Y0, bw, BH, on,
-                 nullptr, "", this->font_value_);
-    sheet_button(sheet, this, card->type == "lock" ? "Закрыть" : "Выключить", bw + 16, Y0, bw, BH,
-                 off, nullptr, "", this->font_value_);
+  } else if (card->type == "lock") {
+    row(Y0, {{"Отпереть", {"lock.unlock", "", ""}},
+             {"Запереть", {"lock.lock", "", ""}}});
 
   } else if (card->type == "cover") {
-    const int bw = (width - 32) / 3;
-    sheet_button(sheet, this, "Вверх", 0, Y0, bw, BH, "cover.open_cover", nullptr, "", this->font_value_);
-    sheet_button(sheet, this, "Стоп", bw + 16, Y0, bw, BH, "cover.stop_cover", nullptr, "",
-                 this->font_value_);
-    sheet_button(sheet, this, "Вниз", 2 * (bw + 16), Y0, bw, BH, "cover.close_cover", nullptr, "",
-                 this->font_value_);
+    row(Y0, {{"Вверх", {"cover.open_cover", "", ""}},
+             {"Стоп", {"cover.stop_cover", "", ""}},
+             {"Вниз", {"cover.close_cover", "", ""}}});
+    caption("Положение", Y0 + BH + 20);
+    slider(Y0 + BH + 54, 0, 100, 50, "cover.set_cover_position", "position");
 
   } else if (card->type == "climate") {
-    lv_obj_t *cap = lv_label_create(sheet);
-    lv_label_set_text(cap, "Уставка");
-    lv_obj_set_pos(cap, 0, Y0);
-    lv_obj_set_style_text_color(cap, lv_color_hex(card_ink2()), LV_PART_MAIN);
-    if (this->font_small_ != nullptr)
-      lv_obj_set_style_text_font(cap, static_cast<const lv_font_t *>(this->font_small_), LV_PART_MAIN);
+    caption("Уставка, °C", Y0);
+    slider(Y0 + 34, 5, 35, 22, "climate.set_temperature", "temperature");
+    caption("Режим", Y0 + 104);
+    row(Y0 + 138, {{"Нагрев", {"climate.set_hvac_mode", "hvac_mode", "heat"}},
+                   {"Холод", {"climate.set_hvac_mode", "hvac_mode", "cool"}},
+                   {"Авто", {"climate.set_hvac_mode", "hvac_mode", "auto"}}});
+    row(Y0 + 138 + BH + 16, {{"Выключить", {"climate.set_hvac_mode", "hvac_mode", "off"}}});
 
-    lv_obj_t *sl = lv_slider_create(sheet);
-    lv_obj_set_size(sl, width, 46);
-    lv_obj_set_pos(sl, 0, Y0 + 34);
-    lv_slider_set_range(sl, 5, 35);
-    lv_slider_set_value(sl, 22, LV_ANIM_OFF);
-    lv_obj_set_style_radius(sl, 23, LV_PART_MAIN);
-    lv_obj_set_style_radius(sl, 23, LV_PART_INDICATOR);
-    lv_obj_set_style_bg_color(sl, accent_for(card->type), LV_PART_INDICATOR);
-    auto *a = new SheetAction{this, "climate.set_temperature", "temperature", ""};  // NOLINT
-    lv_obj_add_event_cb(sl, sheet_slider_cb, LV_EVENT_RELEASED, a);
-    lv_obj_add_event_cb(sl, sheet_action_free_cb, LV_EVENT_DELETE, a);
+  } else if (card->type == "media") {
+    row(Y0, {{"Назад", {"media_player.media_previous_track", "", ""}},
+             {"Пуск и пауза", {"media_player.media_play_pause", "", ""}},
+             {"Вперёд", {"media_player.media_next_track", "", ""}}});
+    caption("Громкость", Y0 + BH + 20);
+    slider(Y0 + BH + 54, 0, 100, 30, "media_player.volume_set", "volume_level");
+    row(Y0 + BH + 124, {{"Выключить", {"media_player.turn_off", "", ""}}});
 
-    const int bw = (width - 16) / 2;
-    sheet_button(sheet, this, "Нагрев", 0, Y0 + 108, bw, BH, "climate.set_hvac_mode", "hvac_mode",
-                 "heat", this->font_value_);
-    sheet_button(sheet, this, "Выключить", bw + 16, Y0 + 108, bw, BH, "climate.set_hvac_mode",
-                 "hvac_mode", "off", this->font_value_);
+  } else if (card->type == "fan") {
+    caption("Скорость", Y0);
+    slider(Y0 + 34, 0, 100, 50, "fan.set_percentage", "percentage");
+    row(Y0 + 104, {{"Включить", {"fan.turn_on", "", ""}},
+                   {"Выключить", {"fan.turn_off", "", ""}}});
 
   } else if (card->type == "scene" || card->type == "script") {
-    sheet_button(sheet, this, "Запустить", 0, Y0, width, BH, dom + ".turn_on", nullptr, "",
-                 this->font_value_);
+    row(Y0, {{"Запустить", {dom + ".turn_on", "", ""}}});
+    caption("Сцена срабатывает сразу, подтверждения нет", Y0 + BH + 20);
+
+  } else if (card->type == "camera") {
+    caption("Изображение с камеры на панели пока не показывается", Y0);
+    caption("Карточка отражает доступность камеры", Y0 + 34);
 
   } else {
-    // Датчики и всё прочее: управлять нечем, показываем текущее значение
-    // крупно — ради этого сюда тоже заходят.
+    // Датчик: крупное значение и подпись. Управлять нечем, но заглянуть
+    // ради цифры — самая частая причина сюда зайти.
     lv_obj_t *big = lv_label_create(sheet);
     lv_label_set_text(big, card->lbl_value != nullptr
                                ? lv_label_get_text(static_cast<lv_obj_t *>(card->lbl_value))
                                : "—");
-    lv_obj_set_pos(big, 0, Y0 + 10);
+    lv_obj_set_pos(big, 0, Y0 + 20);
     lv_obj_set_style_text_color(big, lv_color_hex(card_ink()), LV_PART_MAIN);
     if (this->font_title_ != nullptr)
       lv_obj_set_style_text_font(big, static_cast<const lv_font_t *>(this->font_title_), LV_PART_MAIN);
+    if (!card->unit.empty())
+      caption(("единицы: " + card->unit).c_str(), Y0 + 90);
   }
 }
 
@@ -1290,8 +1371,17 @@ static esp_err_t handle_ha_entities(httpd_req_t *req) {
     token = std::string(o["token"] | "");
     return true;
   });
+  auto *self = static_cast<PanelUI *>(req->user_ctx);
   while (!ha_url.empty() && ha_url.back() == '/')
     ha_url.pop_back();
+
+  // Если редактор ничего не прислал — берём сохранённое на панели.
+  // Так список сущностей работает и после смены браузера, и с телефона.
+  if (ha_url.empty())
+    ha_url = self->ha_url();
+  if (token.empty())
+    token = self->ha_token();
+
   if (ha_url.empty() || token.empty()) {
     httpd_resp_set_status(req, "400 Bad Request");
     return httpd_resp_sendstr(req, "{\"error\":\"нужны адрес и токен\"}");
@@ -1371,12 +1461,26 @@ static esp_err_t handle_ha_entities(httpd_req_t *req) {
   httpd_resp_send_chunk(req, nullptr, 0);
   esp_http_client_close(cli);
   esp_http_client_cleanup(cli);
+  // Сработало — запоминаем, чтобы не спрашивать снова.
+  self->save_ha(ha_url, token);
   ESP_LOGI(TAG, "список сущностей от HA: %d байт", total);
   return ESP_OK;
 }
 
 // Редактор отдаём с самой панели: иначе им неудобно пользоваться —
 // файл пришлось бы держать на диске и вручную вписывать в него адрес.
+// Редактор спрашивает, помнит ли панель подключение к HA. Токен наружу
+// не отдаём никогда — только адрес и признак наличия.
+static esp_err_t handle_get_ha(httpd_req_t *req) {
+  auto *self = static_cast<PanelUI *>(req->user_ctx);
+  add_cors(req);
+  httpd_resp_set_type(req, "application/json");
+  const std::string url = self->ha_url();
+  const bool has = !self->ha_token().empty();
+  std::string out = "{\"url\":\"" + url + "\",\"saved\":" + (has ? "true" : "false") + "}";
+  return httpd_resp_sendstr(req, out.c_str());
+}
+
 static esp_err_t handle_get_editor(httpd_req_t *req) {
   add_cors(req);
   // Без этого браузер держит старую страницу после обновления прошивки,
@@ -1515,7 +1619,7 @@ void PanelUI::start_http_() {
   cfg.server_port = this->http_port_;
   cfg.ctrl_port = this->http_port_ + 1000;  // иначе конфликт с web_server ESPHome
   cfg.lru_purge_enable = true;
-  cfg.max_uri_handlers = 14;
+  cfg.max_uri_handlers = 16;
   cfg.stack_size = 20480;  // TLS-рукопожатие в 8 КиБ не помещается
 
   httpd_handle_t server = nullptr;
@@ -1532,6 +1636,13 @@ void PanelUI::start_http_() {
   get_uri.handler = handle_get_layout;
   get_uri.user_ctx = this;
   httpd_register_uri_handler(server, &get_uri);
+
+  httpd_uri_t hag_uri = {};
+  hag_uri.uri = "/ha/config";
+  hag_uri.method = HTTP_GET;
+  hag_uri.handler = handle_get_ha;
+  hag_uri.user_ctx = this;
+  httpd_register_uri_handler(server, &hag_uri);
 
   httpd_uri_t ha_uri = {};
   ha_uri.uri = "/ha/entities";

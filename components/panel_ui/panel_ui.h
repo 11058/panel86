@@ -48,6 +48,13 @@ class PanelUI : public Component {
   bool write_settings(const std::string &data);
   void load_settings();
 
+  // --- Учётные данные Home Assistant --------------------------------------
+  // Отдельным файлом, а не в settings.json: настройки выгружают, показывают
+  // и держат в git, а токен там делать нечего.
+  std::string ha_url();
+  std::string ha_token();
+  bool save_ha(const std::string &url, const std::string &token);
+
   /// Растёт при каждом сохранении настроек. По нему прошивка понимает,
   /// что настройки изменились, и применяет их — сами по себе они только
   /// лежат в файле.
@@ -62,6 +69,7 @@ class PanelUI : public Component {
   bool day_always_on() const { return this->s_day_always_on_; }
   bool night_off() const { return this->s_night_off_; }
   const std::string &theme() const { return this->s_theme_; }
+  const std::string &font_scale() const { return this->s_font_scale_; }
   const std::string &time_source() const { return this->s_time_source_; }
   const std::string &ntp_server() const { return this->s_ntp_server_; }
   const std::string &timezone() const { return this->s_timezone_; }
@@ -173,6 +181,7 @@ class PanelUI : public Component {
   const char *base_path_{"/fs"};
   const char *layout_file_{"layout.json"};
   const char *settings_file_{"settings.json"};
+  const char *ha_file_{"ha.json"};
   uint16_t http_port_{8080};
   // Тема из раскладки
   uint32_t theme_accent_{0xC2610C};
@@ -206,6 +215,7 @@ class PanelUI : public Component {
   bool s_day_always_on_{false};
   bool s_night_off_{true};
   std::string s_theme_{"dark"};
+  std::string s_font_scale_{"normal"};
   std::string s_time_source_{"sntp"};
   std::string s_ntp_server_{"pool.ntp.org"};
   std::string s_timezone_{"UTC-5"};

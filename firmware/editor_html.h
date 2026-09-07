@@ -156,6 +156,15 @@ static const char EDITOR_HTML[] = R"PANELEDITOR(
       <input id="sDim" type="range" min="0" max="60"><span class="val" id="vDim">—</span></div>
     <div class="fld"><span>Тема оформления</span>
       <select id="sTheme"><option value="dark">тёмная</option><option value="light">светлая</option></select></div>
+    <div class="fld"><span>Размер шрифта</span>
+      <select id="sFont">
+        <option value="small">мелкий</option>
+        <option value="normal">обычный</option>
+        <option value="large">крупный</option>
+      </select></div>
+    <p class="note">Размеры собраны в прошивку заранее — в ESPHome шрифт
+      задаётся при сборке. Поэтому выбор из трёх наборов, а не произвольное
+      число.</p>
 
     <h3>Расписание</h3>
     <div class="fld"><span>День начинается</span><select id="sDay"></select></div>
@@ -401,10 +410,10 @@ static const char EDITOR_HTML[] = R"PANELEDITOR(
 "use strict";
 
 // Каталог намеренно закрытый — тот же, что в схеме и в прошивке.
-const TYPES = ["light","switch","climate","cover","valve","scene","script",
-               "sensor","media","camera","lock","relay","room_grid","spacer"];
-const NUMERIC = new Set(["sensor","climate"]);
-const CONTROLLABLE = new Set(["light","switch","valve","cover","scene","script","lock"]);
+const TYPES = ["light","switch","climate","cover","valve","fan","scene","script",
+               "sensor","binary_sensor","media","camera","lock"];
+const NUMERIC = new Set(["sensor","binary_sensor","climate"]);
+const CONTROLLABLE = new Set(["light","switch","valve","cover","fan","scene","script","lock","media"]);
 
 const BLANK = {
   schema:"panel86/1", room:"", revision:1,
@@ -722,7 +731,7 @@ let tab = "layout";
 })();
 
 const DEF_SETTINGS = {
-  display:{brightness:80, sleep_after:"60s", sleep_brightness:10, theme:"dark",
+  display:{brightness:80, sleep_after:"60s", sleep_brightness:10, theme:"dark", font_scale:"normal",
            day_start:7, night_start:23, day_always_on:false, night_off:true,
            wake_on_motion:true},
   time:{source:"sntp", server:"pool.ntp.org", timezone:"UTC-5", sync_every:"6h"}
@@ -736,6 +745,7 @@ function settingsToForm(){
   $("vDim").textContent = ($("sDim").value) + " %";
   $("sSleep").value = d.sleep_after ?? "60s";
   $("sTheme").value = d.theme ?? "dark";
+  $("sFont").value = d.font_scale ?? "normal";
   $("sDay").value = d.day_start ?? 7;
   $("sNight").value = d.night_start ?? 23;
   $("sDayOn").checked = !!d.day_always_on;
@@ -754,6 +764,7 @@ function formToSettings(){
       sleep_after:       $("sSleep").value,
       sleep_brightness: +$("sDim").value,
       theme:             $("sTheme").value,
+      font_scale:        $("sFont").value,
       day_start:        +$("sDay").value,
       night_start:      +$("sNight").value,
       day_always_on:     $("sDayOn").checked,
@@ -849,7 +860,8 @@ function entName(id){
 async function haLoad(){
   const url = $("haUrl").value.trim().replace(/\/+$/,"");
   const token = $("haToken").value.trim();
-  if (!url || !token) return say3("Нужны адрес и токен", true);
+  // Пустое поле — не ошибка: панель подставит сохранённое у себя.
+  if (!url && !token) return say3("Укажите адрес и токен либо загрузите с сохранёнными", true);
   say3("Панель идёт к Home Assistant за списком…");
   try {
     // Запрос делает ПАНЕЛЬ: браузер к HA напрямую не пустят, у него
@@ -964,6 +976,21 @@ $("cPick").onclick = () => openPicker(e => {
 $("host").value = localStorage.getItem("panel86.host") || "";
 $("haUrl").value = localStorage.getItem("panel86.haUrl") || "";
 $("haToken").value = localStorage.getItem("panel86.haToken") || "";
+
+// Панель помнит подключение сама — токен переживает и смену браузера,
+// и перепрошивку. Спрашиваем её, что она знает.
+(async () => {
+  try {
+    const r = await fetch(base()+"/ha/config", {cache:"no-store"});
+    if (!r.ok) return;
+    const c = await r.json();
+    if (c.url && !$("haUrl").value) $("haUrl").value = c.url;
+    if (c.saved) {
+      $("haToken").placeholder = "сохранён на панели — можно не вводить";
+      say3("Панель помнит подключение к " + (c.url || "Home Assistant"));
+    }
+  } catch(_){}
+})();
 // Открыт с панели — сразу подтягиваем то, что на ней лежит.
 if (location.protocol.startsWith("http")) {
   $("host").placeholder = "эта панель";
