@@ -172,6 +172,12 @@ static const char EDITOR_HTML[] = R"PANELEDITOR(
     <div class="fld"><span>Днём не гаснуть</span><input id="sDayOn" type="checkbox"></div>
     <div class="fld"><span>Ночью гаснуть полностью</span><input id="sNightOff" type="checkbox"></div>
     <div class="fld"><span>Будить датчиком движения</span><input id="sMotion" type="checkbox"></div>
+    <div class="fld"><span>Показывать заставку</span><input id="sSaver" type="checkbox"></div>
+    <p class="note">Вместо погашенного экрана — часы, дата и погода.
+      Погашенный экран выглядит сломанным, а часы — работающими: панель
+      на стене большую часть суток не используется, и именно в этом
+      состоянии её видят чаще всего. Ночью, когда задано «гаснуть
+      полностью», заставка не появляется.</p>
     <p class="note">Датчик присутствия пока не подключён — настройка сохранится
       и заработает, когда он появится.</p>
 
@@ -486,7 +492,7 @@ static const char EDITOR_HTML[] = R"PANELEDITOR(
 
 // Каталог намеренно закрытый — тот же, что в схеме и в прошивке.
 const TYPES = ["light","switch","climate","cover","valve","fan","scene","script",
-               "sensor","binary_sensor","media","camera","lock",
+               "sensor","binary_sensor","media","camera","lock","weather",
                "separator","buttons"];
 const NUMERIC = new Set(["sensor","binary_sensor","climate"]);
 const CONTROLLABLE = new Set(["light","switch","valve","cover","fan","scene","script","lock","media"]);
@@ -504,16 +510,24 @@ let pageIx = 0, cardIx = -1;
 const $ = id => document.getElementById(id);
 const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
 
+// Цвета состояний Home Assistant — те же, что в прошивке. Свой акцент
+// из темы перекрывает их целиком.
 function accentFor(type){
-  const a = doc.theme?.accent || "#C2610C";
-  if (["light","switch","scene","script"].includes(type)) return a;
-  if (type === "climate") return "#c05050";
-  if (["valve","cover"].includes(type)) return "#4a8fd0";
-  return "#7c8b99";
+  if (doc.theme?.accent) return doc.theme.accent;
+  if (["light","switch","scene","script","cover","binary_sensor"].includes(type)) return "#FFC107";
+  if (type === "climate") return "#FF8100";
+  if (type === "valve")   return "#2196F3";
+  if (type === "fan")     return "#66BB6A";
+  if (type === "media")   return "#5C6BC0";
+  if (type === "lock")    return "#4CAF50";
+  if (type === "camera")  return "#9575CD";
+  if (type === "weather") return "#4FC3F7";
+  return "#8A94A0";
 }
 
 // Демонстрационное значение — то же, что показывает демо-режим прошивки.
 function demoValue(type, i){
+  if (type === "weather") return "Переменная облачность";
   if (["light","switch","valve"].includes(type)) return i % 2 ? "Выкл" : "Вкл";
   if (type === "climate") return "Нагрев";
   if (type === "cover")   return i % 2 ? "Закрыто" : "Открыто";
@@ -1094,6 +1108,7 @@ function settingsToForm(){
   $("sDayOn").checked = !!d.day_always_on;
   $("sNightOff").checked = d.night_off !== false;
   $("sMotion").checked = d.wake_on_motion !== false;
+  $("sSaver").checked = d.screensaver !== false;
   $("sTimeSrc").value = t.source ?? "sntp";
   $("sNtp").value = t.server ?? "pool.ntp.org";
   $("sTz").value = t.timezone ?? "UTC-5";
@@ -1120,7 +1135,8 @@ function formToSettings(){
       night_start:      +$("sNight").value,
       day_always_on:     $("sDayOn").checked,
       night_off:         $("sNightOff").checked,
-      wake_on_motion:    $("sMotion").checked
+      wake_on_motion:    $("sMotion").checked,
+      screensaver:       $("sSaver").checked
     },
     time:{
       source:      $("sTimeSrc").value,

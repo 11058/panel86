@@ -86,6 +86,12 @@ class PanelUI : public Component {
   int  night_start_hour() const { return this->s_night_start_; }
   bool day_always_on() const { return this->s_day_always_on_; }
   bool night_off() const { return this->s_night_off_; }
+  bool saver_enabled() const { return this->s_saver_; }
+  const std::string &saver_weather() const { return this->s_saver_weather_; }
+
+  /// Краткая погода для заставки: берётся из первой погодной карточки
+  /// раскладки. Отдельная настройка ради уже указанного не нужна.
+  const char *weather_summary();
   const std::string &theme() const { return this->s_theme_; }
   const std::string &font_scale() const { return this->s_font_scale_; }
   const std::string &time_source() const { return this->s_time_source_; }
@@ -323,6 +329,8 @@ class PanelUI : public Component {
   int  s_night_start_{23};     // час начала «ночи»
   bool s_day_always_on_{false};
   bool s_night_off_{true};
+  bool s_saver_{true};
+  std::string s_saver_weather_;
   std::string s_theme_{"dark"};
   std::string s_font_scale_{"normal"};
   std::string s_time_source_{"sntp"};

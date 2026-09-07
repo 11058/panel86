@@ -74,6 +74,7 @@ script:
           lv_obj_t *const pages[] = {
             id(page_p0)->obj, id(page_layout)->obj, id(page_settings)->obj,
             id(page_netstat)->obj, id(page_wifi_list)->obj, id(page_wifi_pass)->obj,
+            id(page_saver)->obj,
           };
           int ok = 0, nul = 0;
           for (lv_obj_t *pg : pages) {

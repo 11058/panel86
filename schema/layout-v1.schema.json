@@ -196,6 +196,7 @@
             "sensor",
             "binary_sensor",
             "media",
+            "weather",
             "camera",
             "lock",
             "relay",

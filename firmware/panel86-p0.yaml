@@ -117,6 +117,7 @@ packages:
   statusbar: !include packages/statusbar.yaml
   settings: !include packages/settings-ui.yaml
   lvtheme: !include packages/lvgl-theme.yaml
+  saver: !include packages/screensaver.yaml
   theme: !include packages/theme-fix.yaml
 
 # Оба канала одновременно. Первый в списке — приоритетный: именно он

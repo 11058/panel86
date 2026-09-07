@@ -346,6 +346,8 @@ void PanelUI::load_settings() {
       this->s_night_start_ = d["night_start"] | 23;
       this->s_day_always_on_ = d["day_always_on"] | false;
       this->s_night_off_ = d["night_off"] | true;
+      this->s_saver_ = d["screensaver"] | true;
+      this->s_saver_weather_ = std::string(d["screensaver_weather"] | "");
     }
     JsonObject t = doc["time"].as<JsonObject>();
     if (!t.isNull()) {
@@ -580,6 +582,45 @@ static lv_color_t card_color(const PanelUI::Card *card) {
   return state_color(card->type, card->state);
 }
 
+// Иконка по погодному условию Home Assistant. Имена условий у HA свои
+// и с именами иконок не совпадают, поэтому нужна таблица.
+static std::string weather_icon(const std::string &cond) {
+  if (cond == "sunny" || cond == "clear")        return "weather-sunny";
+  if (cond == "clear-night")                     return "weather-night";
+  if (cond == "cloudy")                          return "weather-cloudy";
+  if (cond == "partlycloudy")                    return "weather-partly-cloudy";
+  if (cond == "rainy")                           return "weather-rainy";
+  if (cond == "pouring")                         return "weather-pouring";
+  if (cond == "snowy")                           return "weather-snowy";
+  if (cond == "snowy-rainy")                     return "weather-snowy-rainy";
+  if (cond == "fog")                             return "weather-fog";
+  if (cond == "lightning")                       return "weather-lightning";
+  if (cond == "lightning-rainy")                 return "weather-lightning-rainy";
+  if (cond == "windy" || cond == "windy-variant") return "weather-windy";
+  if (cond == "hail")                            return "weather-hail";
+  return "help-circle";
+}
+
+// Человеческое название погодного условия. «partlycloudy» на стене
+// читать никто не станет.
+static std::string weather_text(const std::string &cond) {
+  if (cond == "sunny" || cond == "clear")   return "Ясно";
+  if (cond == "clear-night")                return "Ясная ночь";
+  if (cond == "cloudy")                     return "Облачно";
+  if (cond == "partlycloudy")               return "Переменная облачность";
+  if (cond == "rainy")                      return "Дождь";
+  if (cond == "pouring")                    return "Ливень";
+  if (cond == "snowy")                      return "Снег";
+  if (cond == "snowy-rainy")                return "Мокрый снег";
+  if (cond == "fog")                        return "Туман";
+  if (cond == "lightning")                  return "Гроза";
+  if (cond == "lightning-rainy")            return "Гроза с дождём";
+  if (cond == "windy" || cond == "windy-variant") return "Ветрено";
+  if (cond == "hail")                       return "Град";
+  if (cond == "exceptional")                return "Опасная погода";
+  return cond;
+}
+
 // Иконка карточки. Своя из раскладки имеет приоритет, иначе разумная
 // по типу — чтобы карточка выглядела осмысленно сразу после добавления.
 static const char *icon_for(const std::string &type, const std::string &custom) {
@@ -647,6 +688,12 @@ void PanelUI::render_card_(void *parent, Card *card, int x, int y, int w, int h)
     card->owner = this;
     return;
   }
+
+  // Погода: состояние сущности — это условие (sunny, rainy...), а иконка
+  // должна ему соответствовать. Отдельная таблица, потому что имена
+  // условий в Home Assistant свои и с именами иконок не совпадают.
+  if (card->type == "weather")
+    card->icon_name = weather_icon(card->state);
 
   // Камера: кадр во всю карточку. Смысл камеры — увидеть, а не прочитать
   // подпись, поэтому изображение занимает всё, а название лежит поверх.
@@ -810,6 +857,8 @@ void PanelUI::render_card_(void *parent, Card *card, int x, int y, int w, int h)
     ctl_w = 232;
   else if (!card->sub_buttons.empty())
     ctl_w = 74 + static_cast<int>(card->sub_buttons.size()) * 60;
+  else if (card->type == "weather")
+    ctl_w = 130;
   else if (card->type == "light" || card->type == "fan" || card->type == "cover")
     ctl_w = 96;
 
@@ -1024,6 +1073,16 @@ void PanelUI::build_inline_controls(void *box_v, Card *card, int w, int h, int c
       lv_obj_add_event_cb(b, sheet_action_free_cb, LV_EVENT_DELETE, a);
     }
 
+  } else if (card->type == "weather") {
+    // Температура крупно справа: ради неё на карточку и смотрят.
+    lv_obj_t *t = lv_label_create(box);
+    lv_label_set_text(t, "—");
+    lv_obj_align(t, LV_ALIGN_RIGHT_MID, -18, 0);
+    lv_obj_set_style_text_color(t, lv_color_hex(card_ink()), LV_PART_MAIN);
+    if (this->font_title_ != nullptr)
+      lv_obj_set_style_text_font(t, static_cast<const lv_font_t *>(this->font_title_), LV_PART_MAIN);
+    card->ctl_value = t;
+
   } else if (card->type == "light") {
     // У света справа только процент яркости: управление — касанием
     // карточки и ползунком в подробностях.
@@ -1121,6 +1180,25 @@ void PanelUI::fetch_templates_task() {
   this->tpl_busy_ = false;
 }
 
+const char *PanelUI::weather_summary() {
+  for (auto *c : this->cards_) {
+    if (c->type != "weather" || c->lbl_value == nullptr)
+      continue;
+    static std::string out;
+    const char *cond = lv_label_get_text(static_cast<lv_obj_t *>(c->lbl_value));
+    const char *temp = c->ctl_value != nullptr
+                           ? lv_label_get_text(static_cast<lv_obj_t *>(c->ctl_value))
+                           : "";
+    out = std::string(cond != nullptr ? cond : "");
+    if (temp != nullptr && *temp != 0 && out != "—") {
+      out += "   ";
+      out += temp;
+    }
+    return out.c_str();
+  }
+  return "";
+}
+
 void PanelUI::refresh_cameras() {
 #ifdef USE_IMAGE
   for (auto *c : this->cards_) {
@@ -1204,6 +1282,15 @@ void PanelUI::apply_state_(Card *card, const std::string &state) {
   card->state = state;
   std::string shown = humanize(state);
 
+  if (card->type == "weather") {
+    shown = weather_text(state);
+    if (card->icon != nullptr) {
+      const char *g = icon_by_name(weather_icon(state).c_str());
+      if (g != nullptr)
+        lv_label_set_text(static_cast<lv_obj_t *>(card->icon), g);
+    }
+  }
+
   bool numeric = false;
   float num = NAN;
   {
@@ -1244,6 +1331,30 @@ void PanelUI::apply_state_(Card *card, const std::string &state) {
                      state == "playing" || state == "unlocked" || state == "drying");
     lv_obj_set_style_text_color(value, on ? card_color(card) : lv_color_hex(card_ink3()),
                                 LV_PART_MAIN);
+  }
+
+  // Недоступная сущность гасится целиком, а не сообщает об этом надписью.
+  // Приглушённая карточка читается мгновенно и не требует чтения: видно,
+  // что трогать её бесполезно.
+  if (box != nullptr) {
+    const bool dead = (state == "unavailable" || state == "unknown" || state.empty());
+    lv_obj_set_style_opa(box, dead ? LV_OPA_40 : LV_OPA_COVER, LV_PART_MAIN);
+    if (dead) {
+      lv_obj_clear_flag(box, LV_OBJ_FLAG_CLICKABLE);
+      if (card->icon_box != nullptr)
+        lv_obj_set_style_bg_color(static_cast<lv_obj_t *>(card->icon_box),
+                                  lv_color_hex(card_ink3()), LV_PART_MAIN);
+      if (card->icon != nullptr) {
+        const char *g = icon_by_name("help-circle");
+        if (g != nullptr)
+          lv_label_set_text(static_cast<lv_obj_t *>(card->icon), g);
+        lv_obj_set_style_text_color(static_cast<lv_obj_t *>(card->icon),
+                                    lv_color_hex(card_ink3()), LV_PART_MAIN);
+      }
+      lv_label_set_text(value, "нет связи");
+      lv_obj_set_style_text_color(value, lv_color_hex(card_ink3()), LV_PART_MAIN);
+      return;
+    }
   }
 
   // Включённое подсвечивается целиком: сам пузырь, круг и символ.
@@ -1766,6 +1877,17 @@ void PanelUI::bind_entities() {
           card->entity, optional<std::string>("temperature"),
           std::function<void(StringRef)>([card](StringRef v) {
             card->target_temp = strtof(std::string(v.c_str(), v.size()).c_str(), nullptr);
+          }));
+      n++;
+    }
+
+    if (card->type == "weather") {
+      api::global_api_server->subscribe_home_assistant_state(
+          card->entity, optional<std::string>("temperature"),
+          std::function<void(StringRef)>([card](StringRef v) {
+            if (card->ctl_value == nullptr) return;
+            std::string t(v.c_str(), v.size());
+            lv_label_set_text(static_cast<lv_obj_t *>(card->ctl_value), (t + "°").c_str());
           }));
       n++;
     }
