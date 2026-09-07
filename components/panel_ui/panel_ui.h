@@ -114,6 +114,16 @@ class PanelUI : public Component {
     std::string entity;
   };
 
+  /// Подкнопка на карточке — маленькая круглая кнопка справа.
+  /// В Bubble Card они называются sub-buttons и задаются конфигурацией,
+  /// а не зашиты по типу сущности. Здесь так же.
+  struct SubButton {
+    std::string icon;      // имя MDI
+    std::string service;   // что вызвать, например cover.open_cover
+    std::string key;       // необязательный параметр
+    std::string value;
+  };
+
   struct Card {
     std::string type;
     std::string entity;
@@ -150,6 +160,7 @@ class PanelUI : public Component {
     int   color_temp{-1};      // кельвины
     int32_t rgb{-1};           // цвет лампы, 0xRRGGBB
     std::vector<RowButton> buttons;
+    std::vector<SubButton> sub_buttons;
     void *cam_slot{nullptr};   // online_image::OnlineImage *
     PanelUI *owner{nullptr};
 

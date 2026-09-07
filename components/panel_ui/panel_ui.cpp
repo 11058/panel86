@@ -458,6 +458,17 @@ static void buttons_row_cb(lv_event_t *e) {
   a->self->call_service_for(a->value, a->service);
 }
 
+// Подкнопка на карточке: действует на сущность своей карточки.
+static void sub_button_cb(lv_event_t *e) {
+  auto *a = static_cast<SheetAction *>(lv_event_get_user_data(e));
+  if (a == nullptr || a->card == nullptr || a->card->entity.empty())
+    return;
+  if (a->key.empty())
+    a->self->call_service_for(a->card->entity, a->service);
+  else
+    a->self->call_service_for_with(a->card->entity, a->service, a->key, a->value);
+}
+
 static void sheet_action_cb(lv_event_t *e) {
   auto *a = static_cast<SheetAction *>(lv_event_get_user_data(e));
   if (a == nullptr)
@@ -512,39 +523,33 @@ void PanelUI::render_card_(void *parent, Card *card, int x, int y, int w, int h)
     lv_obj_set_pos(wrap, x, y);
     lv_obj_set_size(wrap, w, h);
 
-    // Иконка и подпись по центру, линии по обе стороны. Так раздел
-    // читается как заголовок, а не как ещё одна строка списка.
-    lv_obj_t *ico = lv_label_create(wrap);
-    lv_label_set_text(ico, icon_for(card->type, card->icon_name));
-    lv_obj_set_style_text_color(ico, lv_color_hex(card_ink2()), LV_PART_MAIN);
-    if (this->font_icon_ != nullptr)
-      lv_obj_set_style_text_font(ico, static_cast<const lv_font_t *>(this->font_icon_), LV_PART_MAIN);
-
+    // Иконка и подпись по центру, линии по обе стороны.
+    //
+    // Ширину подписи НЕ измеряем: lv_obj_update_layout во время построения
+    // страницы вешал главный цикл на сторожевой таймер. Вместо этого линии
+    // фиксированной доли ширины, а подпись с иконкой — одной строкой
+    // по центру между ними. Выглядит так же, а считать нечего.
     lv_obj_t *lbl = lv_label_create(wrap);
-    lv_label_set_text(lbl, card->label.c_str());
+    std::string text = std::string(icon_for(card->type, card->icon_name)) + "  " + card->label;
+    lv_label_set_text(lbl, text.c_str());
+    lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(lbl, w / 2);
+    lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_align(lbl, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_text_color(lbl, lv_color_hex(card_ink2()), LV_PART_MAIN);
     if (this->font_body_ != nullptr)
       lv_obj_set_style_text_font(lbl, static_cast<const lv_font_t *>(this->font_body_), LV_PART_MAIN);
 
-    lv_obj_update_layout(wrap);
-    const int iw = lv_obj_get_width(ico);
-    const int lw = lv_obj_get_width(lbl);
-    const int gap2 = 10;
-    const int total = iw + gap2 + lw;
-    const int cx0 = (w - total) / 2;
-    lv_obj_align(ico, LV_ALIGN_LEFT_MID, cx0, 0);
-    lv_obj_align(lbl, LV_ALIGN_LEFT_MID, cx0 + iw + gap2, 0);
-
-    const int lineW = cx0 - 24;
-    if (lineW > 10) {
-      for (int side = 0; side < 2; side++) {
-        lv_obj_t *line = lv_obj_create(wrap);
-        lv_obj_remove_style_all(line);
-        lv_obj_set_size(line, lineW, 2);
-        lv_obj_align(line, side == 0 ? LV_ALIGN_LEFT_MID : LV_ALIGN_RIGHT_MID, side == 0 ? 6 : -6, 0);
-        lv_obj_set_style_bg_color(line, lv_color_hex(card_ink3()), LV_PART_MAIN);
-        lv_obj_set_style_bg_opa(line, LV_OPA_40, LV_PART_MAIN);
-      }
+    const int lineW = w / 5;
+    for (int side = 0; side < 2; side++) {
+      lv_obj_t *line = lv_obj_create(wrap);
+      lv_obj_remove_style_all(line);
+      // Размеры из styles.css образца: высота 6, скругление, прозрачность 0.6.
+      lv_obj_set_size(line, lineW, 6);
+      lv_obj_align(line, side == 0 ? LV_ALIGN_LEFT_MID : LV_ALIGN_RIGHT_MID, side == 0 ? 8 : -8, 0);
+      lv_obj_set_style_radius(line, 3, LV_PART_MAIN);
+      lv_obj_set_style_bg_color(line, lv_color_hex(card_bg()), LV_PART_MAIN);
+      lv_obj_set_style_bg_opa(line, LV_OPA_60, LV_PART_MAIN);
     }
 
     card->box = wrap;
@@ -687,6 +692,8 @@ void PanelUI::render_card_(void *parent, Card *card, int x, int y, int w, int h)
   lv_obj_t *ibox = lv_obj_create(box);
   lv_obj_remove_style_all(ibox);
   lv_obj_set_size(ibox, d, d);
+  // Положение иконки зависит от того, поместился ли текст сбоку.
+  // Решение принимается ниже, поэтому пока ставим по центру слева.
   lv_obj_align(ibox, LV_ALIGN_LEFT_MID, 9, 0);
   lv_obj_set_style_radius(ibox, d / 2, LV_PART_MAIN);
   lv_obj_set_style_bg_color(ibox, accent, LV_PART_MAIN);
@@ -701,26 +708,50 @@ void PanelUI::render_card_(void *parent, Card *card, int x, int y, int w, int h)
   if (this->font_icon_ != nullptr)
     lv_obj_set_style_text_font(icon, static_cast<const lv_font_t *>(this->font_icon_), LV_PART_MAIN);
 
-  // Ширина, занятая органами управления справа. Текст не должен под них
-  // залезать, иначе имя обрывается на полуслове.
+  // Сколько места займут органы управления справа — и поместятся ли они
+  // вообще. Карточка может быть любой ширины: во всю строку, в половину,
+  // в четверть. Внутренности обязаны подстроиться, а не налезать на текст.
+  const int tx = 10 + d + 14;
+  const int MIN_TEXT = 110;   // меньше — имя превращается в многоточие
+
   int ctl_w = 0;
   if (card->type == "climate")
     ctl_w = 232;
-  else if (card->type == "cover")
-    ctl_w = 268;
-  else if (card->type == "fan")
-    ctl_w = 210;
-  else if (card->type == "light")
+  else if (!card->sub_buttons.empty())
+    ctl_w = 74 + static_cast<int>(card->sub_buttons.size()) * 60;
+  else if (card->type == "light" || card->type == "fan" || card->type == "cover")
     ctl_w = 96;
 
-  const int tx = 10 + d + 14;
+  // Ужимаем по очереди: сначала выбрасываем подкнопки, потом отказываемся
+  // от органов вовсе. Лучше показать имя и состояние, чем ряд кнопок
+  // поверх обрезанного текста.
+  while (ctl_w > 0 && w - tx - ctl_w - 14 < MIN_TEXT) {
+    if (!card->sub_buttons.empty()) {
+      card->sub_buttons.pop_back();
+      ctl_w = card->sub_buttons.empty() ? 0 : 74 + static_cast<int>(card->sub_buttons.size()) * 60;
+    } else if (card->type == "climate" && ctl_w > 150) {
+      ctl_w = 150;   // пилюля без запаса по краям
+    } else {
+      ctl_w = 0;
+    }
+  }
+
   const int text_w = w - tx - ctl_w - 14;
+
+  // На совсем узкой карточке текст не помещается рядом с иконкой —
+  // тогда кладём его под ней, как плитку. Так половинная и четвертная
+  // карточка остаются читаемыми.
+  const bool stacked = text_w < 90;
+  const int ty = stacked ? 0 : tx;
 
   lv_obj_t *name = lv_label_create(box);
   lv_label_set_text(name, card->label.c_str());
   lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
-  lv_obj_set_width(name, text_w > 40 ? text_w : 40);
-  lv_obj_align(name, LV_ALIGN_LEFT_MID, tx, -13);
+  lv_obj_set_width(name, stacked ? w - 24 : (text_w > 40 ? text_w : 40));
+  if (stacked)
+    lv_obj_align(name, LV_ALIGN_BOTTOM_LEFT, 12, -34);
+  else
+    lv_obj_align(name, LV_ALIGN_LEFT_MID, tx, -13);
   lv_obj_set_style_text_color(name, lv_color_hex(card_ink()), LV_PART_MAIN);
   if (this->font_body_ != nullptr)
     lv_obj_set_style_text_font(name, static_cast<const lv_font_t *>(this->font_body_), LV_PART_MAIN);
@@ -730,8 +761,11 @@ void PanelUI::render_card_(void *parent, Card *card, int x, int y, int w, int h)
   lv_obj_t *value = lv_label_create(box);
   lv_label_set_text(value, "—");
   lv_label_set_long_mode(value, LV_LABEL_LONG_DOT);
-  lv_obj_set_width(value, text_w > 40 ? text_w : 40);
-  lv_obj_align(value, LV_ALIGN_LEFT_MID, tx, 15);
+  lv_obj_set_width(value, stacked ? w - 24 : (text_w > 40 ? text_w : 40));
+  if (stacked)
+    lv_obj_align(value, LV_ALIGN_BOTTOM_LEFT, 12, -8);
+  else
+    lv_obj_align(value, LV_ALIGN_LEFT_MID, tx, 15);
   lv_obj_set_style_text_color(value, lv_color_hex(card_ink3()), LV_PART_MAIN);
   if (this->font_small_ != nullptr)
     lv_obj_set_style_text_font(value, static_cast<const lv_font_t *>(this->font_small_), LV_PART_MAIN);
@@ -739,6 +773,9 @@ void PanelUI::render_card_(void *parent, Card *card, int x, int y, int w, int h)
   lv_obj_t *sub = lv_label_create(box);
   lv_label_set_text(sub, "");
   lv_obj_add_flag(sub, LV_OBJ_FLAG_HIDDEN);
+
+  if (stacked)
+    lv_obj_align(ibox, LV_ALIGN_TOP_LEFT, 12, 12);
 
   card->box = box;
   card->fill = fill;
@@ -787,20 +824,21 @@ void PanelUI::build_step_pill(void *parent_v, Card *card, int x, int y, int w, i
   lv_label_set_text(val, "—");
   lv_obj_center(val);
   lv_obj_set_style_text_color(val, lv_color_hex(card_ink()), LV_PART_MAIN);
-  if (this->font_title_ != nullptr)
-    lv_obj_set_style_text_font(val, static_cast<const lv_font_t *>(this->font_title_), LV_PART_MAIN);
+  if (this->font_body_ != nullptr)
+    lv_obj_set_style_text_font(val, static_cast<const lv_font_t *>(this->font_body_), LV_PART_MAIN);
 
   for (int plus = 0; plus < 2; plus++) {
     lv_obj_t *b = lv_button_create(pill);
     lv_obj_remove_style_all(b);
-    lv_obj_set_size(b, h, h);
-    lv_obj_align(b, plus ? LV_ALIGN_RIGHT_MID : LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_set_size(b, h - 4, h - 4);
+    lv_obj_align(b, plus ? LV_ALIGN_RIGHT_MID : LV_ALIGN_LEFT_MID, plus ? -2 : 2, 0);
+    lv_obj_set_style_radius(b, (h - 4) / 2, LV_PART_MAIN);
     lv_obj_t *l = lv_label_create(b);
     lv_label_set_text(l, plus ? "+" : "−");
     lv_obj_center(l);
     lv_obj_set_style_text_color(l, lv_color_hex(card_ink()), LV_PART_MAIN);
-    if (this->font_title_ != nullptr)
-      lv_obj_set_style_text_font(l, static_cast<const lv_font_t *>(this->font_title_), LV_PART_MAIN);
+    if (this->font_body_ != nullptr)
+      lv_obj_set_style_text_font(l, static_cast<const lv_font_t *>(this->font_body_), LV_PART_MAIN);
     auto *a = new SheetAction{this, service, key, plus ? "+" : "-"};  // NOLINT
     a->card = card;
     a->label_obj = val;
@@ -832,28 +870,20 @@ void PanelUI::build_inline_controls(void *box_v, Card *card, int w, int h, int c
     // Та же пилюля, что в подробностях: один орган управления, одно
     // поведение. Разные реализации в двух местах расходятся уже через
     // неделю правок.
-    this->build_step_pill(box, card, w - ctl_w - 10, (h - (h - 22)) / 2, ctl_w, h - 22,
+    // Размеры из styles.css образца: контейнер 36 при строке 56, то есть
+    // примерно две трети высоты. Пилюля во всю высоту выглядит грубо.
+    const int ph = std::min(h - 26, 52);
+    this->build_step_pill(box, card, w - ctl_w - 10, (h - ph) / 2, ctl_w, ph,
                           "climate.set_temperature", "temperature", 5, 35, 1);
     // Значение пилюли обновляется само при получении уставки из HA.
     card->ctl_value = nullptr;
 
-  } else if (card->type == "fan" || card->type == "cover") {
-    // Ряд круглых кнопок и значение справа — как в образце. Кнопка,
-    // отражающая текущее состояние, обводится цветным кольцом.
-    const int bd = std::min(h - 26, 56);
-    const char *icons[3];
-    const char *svc[3];
-    int n = 0;
-    if (card->type == "fan") {
-      icons[0] = icon_by_name("fan");   svc[0] = "fan.turn_on";
-      icons[1] = icon_by_name("power"); svc[1] = "fan.turn_off";
-      n = 2;
-    } else {
-      icons[0] = icon_by_name("window-shutter"); svc[0] = "cover.open_cover";
-      icons[1] = icon_by_name("pause");          svc[1] = "cover.stop_cover";
-      icons[2] = icon_by_name("blinds");         svc[2] = "cover.close_cover";
-      n = 3;
-    }
+  } else if (!card->sub_buttons.empty()) {
+    // Подкнопки из раскладки. Раньше набор был зашит по типу сущности —
+    // это нарушало правило «вся настройка в веб-интерфейсе» и не давало
+    // сделать, скажем, кнопку сцены на карточке света.
+    const int bd = std::min(h - 26, 52);
+    const int n = static_cast<int>(card->sub_buttons.size());
 
     lv_obj_t *pct = lv_label_create(box);
     lv_label_set_text(pct, "");
@@ -864,23 +894,26 @@ void PanelUI::build_inline_controls(void *box_v, Card *card, int w, int h, int c
     card->ctl_value = pct;
 
     for (int i = 0; i < n; i++) {
+      const auto &sb = card->sub_buttons[i];
       lv_obj_t *b = lv_button_create(box);
       lv_obj_remove_style_all(b);
       lv_obj_set_size(b, bd, bd);
-      lv_obj_align(b, LV_ALIGN_RIGHT_MID, -(78 + (n - 1 - i) * (bd + 8)), 0);
+      lv_obj_align(b, LV_ALIGN_RIGHT_MID, -(74 + (n - 1 - i) * (bd + 8)), 0);
       lv_obj_set_style_radius(b, bd / 2, LV_PART_MAIN);
       lv_obj_set_style_bg_color(b, acc, LV_PART_MAIN);
       lv_obj_set_style_bg_opa(b, LV_OPA_20, LV_PART_MAIN);
+
       lv_obj_t *l = lv_label_create(b);
-      lv_label_set_text(l, icons[i] != nullptr ? icons[i] : "");
+      const char *ic = icon_by_name(sb.icon.c_str());
+      lv_label_set_text(l, ic != nullptr ? ic : "");
       lv_obj_center(l);
       lv_obj_set_style_text_color(l, acc, LV_PART_MAIN);
       if (this->font_icon_ != nullptr)
         lv_obj_set_style_text_font(l, static_cast<const lv_font_t *>(this->font_icon_), LV_PART_MAIN);
-      auto *a = new SheetAction{this, svc[i], "", ""};  // NOLINT
+
+      auto *a = new SheetAction{this, sb.service, sb.key, sb.value};  // NOLINT
       a->card = card;
-      a->value = card->entity;
-      lv_obj_add_event_cb(b, buttons_row_cb, LV_EVENT_CLICKED, a);
+      lv_obj_add_event_cb(b, sub_button_cb, LV_EVENT_CLICKED, a);
       lv_obj_add_event_cb(b, sheet_action_free_cb, LV_EVENT_DELETE, a);
     }
 
@@ -1180,6 +1213,16 @@ void PanelUI::render_page_(void *tile, const void *page_json, int w, int h) {
     if (card->span_h < 1) card->span_h = 1;
     if (card->span_w > cols) card->span_w = cols;
     if (card->span_h > rows) card->span_h = rows;
+
+    for (JsonObject jb : jc["sub_buttons"].as<JsonArray>()) {
+      SubButton sb;
+      sb.icon = std::string(jb["icon"] | "");
+      sb.service = std::string(jb["service"] | "");
+      sb.key = std::string(jb["key"] | "");
+      sb.value = std::string(jb["value"] | "");
+      if (!sb.service.empty())
+        card->sub_buttons.push_back(sb);
+    }
 
     for (JsonObject jb : jc["buttons"].as<JsonArray>()) {
       RowButton rb;
