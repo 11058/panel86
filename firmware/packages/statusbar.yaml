@@ -248,7 +248,23 @@ interval:
           if (!wifi::global_wifi_component->is_connected()) return;
           const ip_addr_t *cur = dns_getserver(0);
           const bool empty = (cur == nullptr) || ip_addr_isany(cur);
-          if (!empty) return;
+
+          // Подставляем резервный, только если имён нет ДОЛГО. Иначе
+          // попадаем в окно подъёма интерфейса, когда DHCP ещё не ответил,
+          // и затираем настоящий сервер своим — наблюдалось при включении
+          // Ethernet: DHCP выдал адрес, а DNS остался 1.1.1.1.
+          static uint32_t empty_since = 0;
+          if (!empty) {
+            empty_since = 0;
+            return;
+          }
+          const uint32_t now2 = millis();
+          if (empty_since == 0) {
+            empty_since = now2;
+            return;
+          }
+          if (now2 - empty_since < 30000)
+            return;
           ip_addr_t fb;
           IP_ADDR4(&fb, 1, 1, 1, 1);
           dns_setserver(0, &fb);
@@ -259,7 +275,7 @@ interval:
           static uint32_t reported = 0;
           if (millis() - reported > 60000) {
             reported = millis();
-            ESP_LOGW("net", "сервер имён затирается (вероятно, Ethernet без кабеля) — держу резервный 1.1.1.1");
+            ESP_LOGW("net", "сервера имён нет уже полминуты — ставлю резервный 1.1.1.1");
           }
 
   # Применение настроек, пришедших из веб-интерфейса.
