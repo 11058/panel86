@@ -284,6 +284,25 @@
               }
             }
           }
+        },
+        "template": {
+          "type": "object",
+          "description": "Шаблоны Home Assistant. Вычисляет их HA, панель показывает результат. Все шаблоны раскладки уходят одним запросом раз в полминуты.",
+          "additionalProperties": false,
+          "properties": {
+            "label": {
+              "type": "string",
+              "description": "Подпись карточки."
+            },
+            "state": {
+              "type": "string",
+              "description": "Вторая строка вместо состояния сущности."
+            },
+            "icon": {
+              "type": "string",
+              "description": "Должен вернуть имя иконки Material Design Icons."
+            }
+          }
         }
       },
       "allOf": [

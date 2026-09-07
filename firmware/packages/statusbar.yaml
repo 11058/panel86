@@ -308,3 +308,12 @@ interval:
           if (!api::global_api_server->is_connected() &&
               !wifi::global_wifi_component->is_connected()) return;
           id(panel_storage)->refresh_cameras();
+
+  # Пересчёт шаблонов.
+  #
+  # Раз в полминуты: значения меняются не мгновенно, а каждый запрос —
+  # это TLS-рукопожатие с Home Assistant. Сам запрос уходит в отдельную
+  # задачу и главный цикл не держит.
+  - interval: 30s
+    then:
+      - lambda: 'id(panel_storage)->refresh_templates();'

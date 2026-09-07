@@ -375,6 +375,17 @@
           как в Bubble Card.</p>
       </div>
 
+      <div id="tplFields">
+        <label>Шаблоны Home Assistant</label>
+        <input id="cTplLabel" class="mono" style="width:100%" placeholder="подпись: {{ states('sensor.x') }}">
+        <input id="cTplState" class="mono" style="width:100%; margin-top:6px" placeholder="состояние: {{ ... }}">
+        <input id="cTplIcon" class="mono" style="width:100%; margin-top:6px" placeholder="иконка: {{ 'fire' if ... else 'snowflake' }}">
+        <p class="hint">Вычисляет Home Assistant, панель только показывает
+          результат. Все шаблоны раскладки уходят одним запросом раз
+          в полминуты — отдельный запрос на карточку означал бы десяток
+          рукопожатий на каждое обновление.</p>
+      </div>
+
       <div id="subFields">
         <label>Подкнопки на карточке</label>
         <div id="subList"></div>
@@ -650,6 +661,10 @@ function render(){
     $("lightFields").style.display = c.type === "light" ? "block" : "none";
     $("rowFields").style.display = c.type === "buttons" ? "block" : "none";
     if (c.type === "buttons") renderRowButtons(c);
+    c.template ||= {};
+    $("cTplLabel").value = c.template.label || "";
+    $("cTplState").value = c.template.state || "";
+    $("cTplIcon").value  = c.template.icon  || "";
     const noSub = ["separator","buttons","camera"].includes(c.type);
     $("subFields").style.display = noSub ? "none" : "block";
     if (!noSub) renderSubButtons(c);
@@ -777,6 +792,16 @@ function renderSubButtons(c){
     }
   });
 }
+function tplSet(field, v){
+  const c = cur();
+  c.template ||= {};
+  if (v) c.template[field] = v; else delete c.template[field];
+  if (!Object.keys(c.template).length) delete c.template;
+}
+bind("cTplLabel", e => tplSet("label", e.target.value.trim()));
+bind("cTplState", e => tplSet("state", e.target.value.trim()));
+bind("cTplIcon",  e => tplSet("icon",  e.target.value.trim()));
+
 $("subAdd").onclick = () => {
   const c = cur();
   (c.sub_buttons ||= []).push({icon:"power", service:"{domain}.turn_on", key:"", value:""});

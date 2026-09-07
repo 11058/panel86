@@ -95,6 +95,47 @@ void PanelUI::setup() {
 }
 
 void PanelUI::loop() {
+  // Результаты шаблонов. Пришли из отдельной задачи, применяем здесь:
+  // LVGL не потокобезопасен, и это правило уже стоило одного цикла
+  // перезагрузок.
+  if (this->tpl_ready_) {
+    this->tpl_ready_ = false;
+    size_t pos = 0, idx = 0;
+    while (idx < this->tpl_targets_.size()) {
+      const size_t nl = this->tpl_result_.find('\n', pos);
+      std::string line = this->tpl_result_.substr(pos, nl == std::string::npos ? std::string::npos
+                                                                               : nl - pos);
+      while (!line.empty() && (line.back() == '\r' || line.back() == ' '))
+        line.pop_back();
+
+      Card *c = this->tpl_targets_[idx].first;
+      switch (this->tpl_targets_[idx].second) {
+        case 0:
+          if (c->lbl_name != nullptr)
+            lv_label_set_text(static_cast<lv_obj_t *>(c->lbl_name), line.c_str());
+          break;
+        case 1:
+          if (c->lbl_value != nullptr)
+            lv_label_set_text(static_cast<lv_obj_t *>(c->lbl_value), line.c_str());
+          break;
+        case 2:
+          if (c->icon != nullptr) {
+            const char *g = icon_by_name(line.c_str());
+            if (g != nullptr)
+              lv_label_set_text(static_cast<lv_obj_t *>(c->icon), g);
+          }
+          break;
+        default:
+          break;
+      }
+      if (nl == std::string::npos)
+        break;
+      pos = nl + 1;
+      idx++;
+    }
+    ESP_LOGD(TAG, "шаблоны применены: %u значений", (unsigned) this->tpl_targets_.size());
+  }
+
   // Перестроение, назначенное из веб-сервера. Здесь мы в главном цикле,
   // и трогать LVGL безопасно.
   if (this->rebuild_pending_) {
@@ -939,6 +980,90 @@ void PanelUI::build_inline_controls(void *box_v, Card *card, int w, int h, int c
   }
 }
 
+// Все шаблоны раскладки уходят ОДНИМ запросом: HA сам вычисляет их
+// и возвращает построчно. Отдельный запрос на каждую карточку означал бы
+// десяток TLS-рукопожатий на каждое обновление.
+void PanelUI::refresh_templates() {
+  if (this->tpl_busy_)
+    return;
+
+  this->tpl_targets_.clear();
+  std::string body;
+  for (auto *c : this->cards_) {
+    const std::string *fields[3] = {&c->tpl_label, &c->tpl_state, &c->tpl_icon};
+    for (int i = 0; i < 3; i++) {
+      if (fields[i]->empty())
+        continue;
+      this->tpl_targets_.emplace_back(c, i);
+      body += *fields[i];
+      body += "\\n";
+    }
+  }
+  if (this->tpl_targets_.empty())
+    return;
+
+  const std::string url = this->ha_url();
+  const std::string tok = this->ha_token();
+  if (url.empty() || tok.empty())
+    return;
+
+  // Экранируем кавычки: выражения идут внутрь строки JSON.
+  std::string esc;
+  esc.reserve(body.size() + 32);
+  for (char ch : body) {
+    if (ch == '"' || ch == '\\')
+      esc += '\\';
+    esc += ch;
+  }
+  this->tpl_request_ = "{\"template\":\"" + esc + "\"}";
+
+  this->tpl_busy_ = true;
+  auto *self = this;
+  xTaskCreate(
+      [](void *arg) {
+        static_cast<PanelUI *>(arg)->fetch_templates_task();
+        vTaskDelete(nullptr);
+      },
+      "panel_tpl", 24576, self, 3, nullptr);
+}
+
+void PanelUI::fetch_templates_task() {
+  const std::string url = this->ha_url() + "/api/template";
+  const std::string auth = "Bearer " + this->ha_token();
+
+  esp_http_client_config_t cfg = {};
+  cfg.url = url.c_str();
+  cfg.method = HTTP_METHOD_POST;
+  cfg.timeout_ms = 15000;
+  cfg.crt_bundle_attach = esp_crt_bundle_attach;
+  cfg.buffer_size = 2048;
+  cfg.buffer_size_tx = 2048;
+
+  std::string out;
+  esp_http_client_handle_t cli = esp_http_client_init(&cfg);
+  if (cli != nullptr) {
+    esp_http_client_set_header(cli, "Authorization", auth.c_str());
+    esp_http_client_set_header(cli, "Content-Type", "application/json");
+    esp_http_client_set_post_field(cli, this->tpl_request_.c_str(), this->tpl_request_.size());
+    if (esp_http_client_open(cli, this->tpl_request_.size()) == ESP_OK) {
+      esp_http_client_write(cli, this->tpl_request_.c_str(), this->tpl_request_.size());
+      esp_http_client_fetch_headers(cli);
+      if (esp_http_client_get_status_code(cli) == 200) {
+        char buf[512];
+        int n;
+        while ((n = esp_http_client_read(cli, buf, sizeof(buf))) > 0)
+          out.append(buf, n);
+      }
+      esp_http_client_close(cli);
+    }
+    esp_http_client_cleanup(cli);
+  }
+
+  this->tpl_result_ = out;
+  this->tpl_ready_ = true;   // применит главный цикл: LVGL трогаем только там
+  this->tpl_busy_ = false;
+}
+
 void PanelUI::refresh_cameras() {
 #ifdef USE_IMAGE
   for (auto *c : this->cards_) {
@@ -1222,6 +1347,13 @@ void PanelUI::render_page_(void *tile, const void *page_json, int w, int h) {
     if (card->span_h < 1) card->span_h = 1;
     if (card->span_w > cols) card->span_w = cols;
     if (card->span_h > rows) card->span_h = rows;
+
+    JsonObject jt = jc["template"].as<JsonObject>();
+    if (!jt.isNull()) {
+      card->tpl_label = std::string(jt["label"] | "");
+      card->tpl_state = std::string(jt["state"] | "");
+      card->tpl_icon = std::string(jt["icon"] | "");
+    }
 
     for (JsonObject jb : jc["sub_buttons"].as<JsonArray>()) {
       SubButton sb;

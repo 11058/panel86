@@ -36,6 +36,14 @@ class PanelUI : public Component {
   /// Запросить свежие кадры со всех показанных камер.
   void refresh_cameras();
 
+  /// Запросить у Home Assistant вычисление всех шаблонов раскладки.
+  /// Запрос уходит в отдельную задачу: HTTP блокирует, а главный цикл
+  /// рисует. Результат применяется в loop().
+  void refresh_templates();
+
+  /// Внутреннее: выполняется в отдельной задаче.
+  void fetch_templates_task();
+
   void add_camera_slot(void *online_image) { this->cam_slots_.push_back(online_image); }
 
   void set_fonts(const void *title, const void *value, const void *small, const void *icon = nullptr) {
@@ -161,6 +169,12 @@ class PanelUI : public Component {
     int32_t rgb{-1};           // цвет лампы, 0xRRGGBB
     std::vector<RowButton> buttons;
     std::vector<SubButton> sub_buttons;
+
+    // Шаблоны Home Assistant. Вычисляются на стороне HA — панели такое
+    // не под силу, да и незачем: у HA уже есть все состояния и Jinja.
+    std::string tpl_label;
+    std::string tpl_state;
+    std::string tpl_icon;
     void *cam_slot{nullptr};   // online_image::OnlineImage *
     PanelUI *owner{nullptr};
 
@@ -262,6 +276,11 @@ class PanelUI : public Component {
   // цикле: LVGL не потокобезопасен, и трогать его виджеты из другой задачи
   // одновременно с отрисовкой — гарантированная гонка.
   volatile bool rebuild_pending_{false};
+  volatile bool tpl_ready_{false};
+  volatile bool tpl_busy_{false};
+  std::string tpl_request_;
+  std::string tpl_result_;
+  std::vector<std::pair<Card *, int>> tpl_targets_;  // 0 подпись, 1 состояние, 2 иконка
   uint32_t settings_rev_{0};
 
   // Разобранные настройки
