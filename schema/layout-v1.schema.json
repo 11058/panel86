@@ -256,6 +256,34 @@
             "none"
           ],
           "default": "toggle"
+        },
+        "sub_buttons": {
+          "type": "array",
+          "maxItems": 4,
+          "description": "Маленькие круглые кнопки справа на карточке. Если ширины не хватает, панель убирает их по одной — имя важнее кнопок.",
+          "items": {
+            "type": "object",
+            "required": [
+              "service"
+            ],
+            "properties": {
+              "icon": {
+                "type": "string",
+                "description": "Имя иконки Material Design Icons."
+              },
+              "service": {
+                "type": "string",
+                "description": "Действие Home Assistant. Можно писать {domain} — подставится домен сущности карточки, и одна кнопка «Включить» подойдёт и свету, и розетке."
+              },
+              "key": {
+                "type": "string",
+                "description": "Необязательный параметр действия, например hvac_mode."
+              },
+              "value": {
+                "type": "string"
+              }
+            }
+          }
         }
       },
       "allOf": [

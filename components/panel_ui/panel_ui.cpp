@@ -463,10 +463,19 @@ static void sub_button_cb(lv_event_t *e) {
   auto *a = static_cast<SheetAction *>(lv_event_get_user_data(e));
   if (a == nullptr || a->card == nullptr || a->card->entity.empty())
     return;
+
+  // Подстановка домена: в раскладке можно написать "{domain}.turn_on",
+  // и одна и та же кнопка «Включить» подойдёт и свету, и розетке,
+  // и вентилятору. Иначе на каждый домен пришлось бы заводить свою.
+  std::string svc = a->service;
+  const size_t ph = svc.find("{domain}");
+  if (ph != std::string::npos)
+    svc.replace(ph, 8, a->card->entity.substr(0, a->card->entity.find('.')));
+
   if (a->key.empty())
-    a->self->call_service_for(a->card->entity, a->service);
+    a->self->call_service_for(a->card->entity, svc);
   else
-    a->self->call_service_for_with(a->card->entity, a->service, a->key, a->value);
+    a->self->call_service_for_with(a->card->entity, svc, a->key, a->value);
 }
 
 static void sheet_action_cb(lv_event_t *e) {

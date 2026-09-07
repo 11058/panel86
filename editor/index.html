@@ -375,6 +375,14 @@
           как в Bubble Card.</p>
       </div>
 
+      <div id="subFields">
+        <label>Подкнопки на карточке</label>
+        <div id="subList"></div>
+        <button id="subAdd" style="margin-top:8px">+ подкнопка</button>
+        <p class="hint">Маленькие круглые кнопки справа на карточке.
+          Если места не хватает, панель убирает их по одной — имя важнее.</p>
+      </div>
+
       <div id="rowFields">
         <label>Кнопки в полосе</label>
         <div id="rowList"></div>
@@ -558,7 +566,8 @@ function render(){
       const tx = 10 + d + 10;
 
       el.style.background = active ? acc + "33" : "#161c22";
-      el.style.borderRadius = Math.min(hPx, wPx) / 2 > 24 ? "24px" : (Math.min(hPx,wPx)/2)+"px";
+      // Капсула: скругление равно половине высоты, как в образце.
+      el.style.borderRadius = (hPx / 2) + "px";
 
       let inner = "";
       // Заливка по яркости — только у света и только если включена.
@@ -569,11 +578,29 @@ function render(){
                  `background:${active ? acc : acc+"33"};color:${active ? "#0b0f13" : acc}">●</div>`;
       if (card.show_name !== false)
         inner += `<div class="n" style="left:${tx}px;top:50%;transform:translateY(-22px);` +
-                 `width:${wPx-tx-10}px">` +
+                 `width:${wPx-tx-10}px" data-name="1">` +
                  esc(card.label || entName(card.entity) || card.entity || card.type) + '</div>';
+      // Подкнопки справа — столько, сколько поместится. Ровно та же
+      // логика, что в прошивке: имя важнее кнопок.
+      const subs = card.sub_buttons || [];
+      const bd = Math.min(hPx - 14, 26);
+      let ctlW = subs.length ? 40 + subs.length * (bd + 5) : 0;
+      const MIN_TEXT = 60;
+      let showSubs = subs.length;
+      while (showSubs > 0 && wPx - tx - ctlW - 8 < MIN_TEXT){
+        showSubs--; ctlW = showSubs ? 40 + showSubs * (bd + 5) : 0;
+      }
+      for (let k = 0; k < showSubs; k++){
+        const right = 8 + (showSubs - 1 - k) * (bd + 5);
+        inner += `<div style="position:absolute;right:${right}px;top:50%;` +
+                 `transform:translateY(-50%);width:${bd}px;height:${bd}px;border-radius:50%;` +
+                 `background:${acc}33"></div>`;
+      }
+      const textW = wPx - tx - ctlW - 10;
+
       if (card.show_state !== false)
         inner += `<div class="v" style="left:${tx}px;top:50%;transform:translateY(0px);` +
-                 `width:${wPx-tx-10}px;color:${active ? acc : "#e3e9ee"}">` + esc(shown) + '</div>';
+                 `width:${textW}px;color:${active ? acc : "#e3e9ee"}">` + esc(shown) + '</div>';
       el.innerHTML = inner;
       el.onclick = () => { cardIx = i; render(); };
     }
@@ -623,6 +650,9 @@ function render(){
     $("lightFields").style.display = c.type === "light" ? "block" : "none";
     $("rowFields").style.display = c.type === "buttons" ? "block" : "none";
     if (c.type === "buttons") renderRowButtons(c);
+    const noSub = ["separator","buttons","camera"].includes(c.type);
+    $("subFields").style.display = noSub ? "none" : "block";
+    if (!noSub) renderSubButtons(c);
   }
 
   $("json").value = JSON.stringify(doc, null, 2);
@@ -668,6 +698,90 @@ bind("cShowIcon",  e => { cur().show_icon  = e.target.checked; render(); }, "cha
 bind("cShowName",  e => { cur().show_name  = e.target.checked; render(); }, "change");
 bind("cShowState", e => { cur().show_state = e.target.checked; render(); }, "change");
 bind("cFill",      e => { cur().fill = e.target.checked; render(); }, "change");
+
+// Готовые действия. Домен подставляется от сущности карточки, чтобы
+// одна и та же кнопка «Включить» работала и для света, и для розетки.
+const SUB_ACTIONS = [
+  ["Включить",        "{domain}.turn_on",  "", ""],
+  ["Выключить",       "{domain}.turn_off", "", ""],
+  ["Переключить",     "{domain}.toggle",   "", ""],
+  ["Открыть",         "cover.open_cover",  "", ""],
+  ["Стоп",            "cover.stop_cover",  "", ""],
+  ["Закрыть",         "cover.close_cover", "", ""],
+  ["Отпереть",        "lock.unlock",       "", ""],
+  ["Запереть",        "lock.lock",         "", ""],
+  ["Пуск и пауза",    "media_player.media_play_pause", "", ""],
+  ["Следующий трек",  "media_player.media_next_track", "", ""],
+  ["Предыдущий трек", "media_player.media_previous_track", "", ""],
+  ["Климат: нагрев",  "climate.set_hvac_mode", "hvac_mode", "heat"],
+  ["Климат: холод",   "climate.set_hvac_mode", "hvac_mode", "cool"],
+  ["Климат: авто",    "climate.set_hvac_mode", "hvac_mode", "auto"],
+  ["Климат: выкл",    "climate.set_hvac_mode", "hvac_mode", "off"],
+];
+const ICON_OPTIONS = `<option value="air-conditioner">air-conditioner</option><option value="alert">alert</option><option value="battery">battery</option><option value="blinds">blinds</option><option value="camera">camera</option><option value="cctv">cctv</option><option value="ceiling-light">ceiling-light</option><option value="chart-line">chart-line</option><option value="cog">cog</option><option value="counter">counter</option><option value="curtains">curtains</option><option value="door">door</option><option value="dots-horizontal">dots-horizontal</option><option value="eye">eye</option><option value="fan">fan</option><option value="fire">fire</option><option value="flash">flash</option><option value="fridge">fridge</option><option value="garage">garage</option><option value="gate">gate</option><option value="gauge">gauge</option><option value="home">home</option><option value="lamp">lamp</option><option value="leaf">leaf</option><option value="led-strip">led-strip</option><option value="lightbulb">lightbulb</option><option value="lock">lock</option><option value="lock-open-variant">lock-open-variant</option><option value="motion-sensor">motion-sensor</option><option value="movie-open">movie-open</option><option value="music">music</option><option value="palette">palette</option><option value="pause">pause</option><option value="pipe">pipe</option><option value="play">play</option><option value="power">power</option><option value="power-plug">power-plug</option><option value="radiator">radiator</option><option value="robot-vacuum">robot-vacuum</option><option value="script-text">script-text</option><option value="smoke-detector">smoke-detector</option><option value="snowflake">snowflake</option><option value="speaker">speaker</option><option value="sprinkler-variant">sprinkler-variant</option><option value="television">television</option><option value="thermometer">thermometer</option><option value="thermostat">thermostat</option><option value="toggle-switch">toggle-switch</option><option value="valve">valve</option><option value="washing-machine">washing-machine</option><option value="water">water</option><option value="water-percent">water-percent</option><option value="water-pump">water-pump</option><option value="weather-night">weather-night</option><option value="weather-sunny">weather-sunny</option><option value="wifi">wifi</option><option value="window-shutter">window-shutter</option>`;
+
+function subActionIndex(sb){
+  return SUB_ACTIONS.findIndex(a =>
+    a[1] === sb.service && (a[2]||"") === (sb.key||"") && (a[3]||"") === (sb.value||""));
+}
+
+function renderSubButtons(c){
+  c.sub_buttons ||= [];
+  const box = $("subList");
+  box.innerHTML = "";
+  c.sub_buttons.forEach((sb, i) => {
+    const row = document.createElement("div");
+    row.className = "row";
+    row.style.marginTop = "6px";
+
+    const ic = document.createElement("select");
+    ic.style.width = "150px";
+    ic.innerHTML = ICON_OPTIONS;
+    ic.value = sb.icon || "power";
+    ic.onchange = e => { sb.icon = e.target.value; render(); };
+
+    const ac = document.createElement("select");
+    ac.style.flex = "1";
+    ac.innerHTML = SUB_ACTIONS.map((a,k) => `<option value="${k}">${esc(a[0])}</option>`).join("")
+                 + `<option value="-1">своё действие…</option>`;
+    const idx = subActionIndex(sb);
+    ac.value = String(idx);
+    ac.onchange = e => {
+      const k = +e.target.value;
+      if (k < 0){ sb.service = sb.service || "light.turn_on"; sb.key = ""; sb.value = ""; }
+      else { sb.service = SUB_ACTIONS[k][1]; sb.key = SUB_ACTIONS[k][2]; sb.value = SUB_ACTIONS[k][3]; }
+      render();
+    };
+
+    const del = document.createElement("button");
+    del.className = "danger"; del.textContent = "×";
+    del.onclick = () => { c.sub_buttons.splice(i,1); render(); };
+
+    row.append(ic, ac, del);
+    box.append(row);
+
+    // Своё действие — три поля: сервис, параметр, значение.
+    if (idx < 0){
+      const custom = document.createElement("div");
+      custom.className = "row";
+      custom.style.margin = "4px 0 0 0";
+      custom.innerHTML =
+        `<input class="mono" style="flex:2" placeholder="light.turn_on" value="${esc(sb.service||"")}">` +
+        `<input class="mono" style="flex:1" placeholder="параметр" value="${esc(sb.key||"")}">` +
+        `<input class="mono" style="flex:1" placeholder="значение" value="${esc(sb.value||"")}">`;
+      const [srv, key, val] = custom.children;
+      srv.oninput = e => { sb.service = e.target.value.trim(); };
+      key.oninput = e => { sb.key = e.target.value.trim(); };
+      val.oninput = e => { sb.value = e.target.value.trim(); };
+      box.append(custom);
+    }
+  });
+}
+$("subAdd").onclick = () => {
+  const c = cur();
+  (c.sub_buttons ||= []).push({icon:"power", service:"{domain}.turn_on", key:"", value:""});
+  render();
+};
 
 function renderRowButtons(c){
   c.buttons ||= [];
