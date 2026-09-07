@@ -11,32 +11,38 @@
 # ---------------------------------------------------------------------------
 
 script:
+  # Оформление ТЕКУЩЕЙ страницы.
+  #
+  # Вызывается из on_load каждой страницы, а не проходит по списку:
+  # список приходится дополнять при добавлении страницы, и рано или поздно
+  # про него забывают — так и вышло с расписанием, оно осталось белым.
+  # Страница, красящая себя сама, забыть себя не может.
+  - id: style_page
+    mode: single
+    then:
+      - lambda: |-
+          lv_obj_t *p = lv_screen_active();
+          if (p == nullptr) return;
+          const bool dark = id(panel_storage)->theme() != "light";
+          lv_obj_set_style_bg_color(p, lv_color_hex(dark ? 0x0B0F13 : 0xF2F4F6), LV_PART_MAIN);
+          lv_obj_set_style_bg_opa(p, LV_OPA_COVER, LV_PART_MAIN);
+          lv_obj_set_style_text_color(p, lv_color_hex(dark ? 0xE3E9EE : 0x141C24), LV_PART_MAIN);
+          lv_obj_scroll_to_y(p, 0, LV_ANIM_OFF);
+
+  # Оформление элементов, которые темой страницы не покрываются:
+  # выпадающие списки и ползунки рисуются своими частями.
   - id: apply_theme
     mode: single
     then:
       - lambda: |-
           const bool dark = id(panel_storage)->theme() != "light";
-          const uint32_t BG   = dark ? 0x0B0F13 : 0xF2F4F6;
           const uint32_t CARD = dark ? 0x161C22 : 0xFFFFFF;
           const uint32_t INK  = dark ? 0xE3E9EE : 0x141C24;
           const uint32_t INK2 = dark ? 0x9AA8B4 : 0x4E5D6B;
 
-          lv_obj_t *const pages[] = {
-            id(page_p0)->obj,      id(page_layout)->obj,   id(page_wifi_list)->obj,
-            id(page_wifi_pass)->obj, id(page_settings)->obj, id(page_display)->obj,
-            id(page_network)->obj, id(page_netstat)->obj,  id(page_time)->obj,
-            id(page_about)->obj,
-          };
-          for (lv_obj_t *p : pages) {
-            if (p == nullptr) continue;
-            lv_obj_set_style_bg_color(p, lv_color_hex(BG), LV_PART_MAIN);
-            lv_obj_set_style_bg_opa(p, LV_OPA_COVER, LV_PART_MAIN);
-            lv_obj_set_style_text_color(p, lv_color_hex(INK), LV_PART_MAIN);
-          }
-
-          // Выпадающие списки: убрать символ-стрелку и покрасить и кнопку,
-          // и всплывающий список — он отдельный объект и стиль кнопки
-          // на него не распространяется.
+          // Выпадающие списки: убрать символ-стрелку (в кириллических
+          // шрифтах такого глифа нет, выходил квадрат) и покрасить
+          // и кнопку, и всплывающий список — это разные объекты.
           lv_obj_t *const drops[] = {
             id(dd_theme)->obj, id(dd_time_src)->obj, id(dd_ntp)->obj,
             id(dd_tz)->obj, id(dd_sync)->obj, id(dd_day)->obj, id(dd_night)->obj,
@@ -54,19 +60,15 @@ script:
               lv_obj_set_style_bg_opa(list, LV_OPA_COVER, LV_PART_MAIN);
               lv_obj_set_style_text_color(list, lv_color_hex(INK), LV_PART_MAIN);
               lv_obj_set_style_border_color(list, lv_color_hex(INK2), LV_PART_MAIN);
-              lv_obj_set_style_text_color(list, lv_color_hex(INK), LV_PART_SELECTED);
             }
           }
 
-          // Ползунки: дорожка тёмная, заполнение и ручка акцентные.
-          lv_obj_t *const sliders[] = {
-            id(sld_bright), id(sld_sleep), id(sld_dim),
-          };
-          for (lv_obj_t *s : sliders) {
-            if (s == nullptr) continue;
-            lv_obj_set_style_bg_color(s, lv_color_hex(dark ? 0x2B353E : 0xD6DDE4), LV_PART_MAIN);
-            lv_obj_set_style_bg_color(s, lv_color_hex(0xC2610C), LV_PART_INDICATOR);
-            lv_obj_set_style_bg_color(s, lv_color_hex(0xE9A45C), LV_PART_KNOB);
+          lv_obj_t *const sliders[] = { id(sld_bright), id(sld_sleep), id(sld_dim) };
+          for (lv_obj_t *sl : sliders) {
+            if (sl == nullptr) continue;
+            lv_obj_set_style_bg_color(sl, lv_color_hex(dark ? 0x2B353E : 0xD6DDE4), LV_PART_MAIN);
+            lv_obj_set_style_bg_color(sl, lv_color_hex(0xC2610C), LV_PART_INDICATOR);
+            lv_obj_set_style_bg_color(sl, lv_color_hex(0xE9A45C), LV_PART_KNOB);
           }
           ESP_LOGI("theme", "оформление применено: %s", dark ? "тёмное" : "светлое");
 
@@ -119,21 +121,6 @@ script:
           lv_keyboard_set_textarea(kb, reinterpret_cast<lv_obj_t *>(ta));
           lv_obj_remove_flag(kb, LV_OBJ_FLAG_HIDDEN);
           lv_obj_add_flag(kb, LV_OBJ_FLAG_CLICKABLE);
-
-  # Сброс прокрутки. Если содержимое всё же не поместилось, страница
-  # уезжает и остаётся уехавшей при следующем входе — выглядит как поломка.
-  - id: reset_scroll
-    mode: single
-    then:
-      - lambda: |-
-          lv_obj_t *const pages[] = {
-            id(page_settings)->obj, id(page_display)->obj, id(page_schedule)->obj,
-            id(page_network)->obj, id(page_netstat)->obj, id(page_time)->obj,
-            id(page_about)->obj,
-          };
-          for (lv_obj_t *p : pages)
-            if (p != nullptr)
-              lv_obj_scroll_to_y(p, 0, LV_ANIM_OFF);
 
   - id: kb_hide
     mode: single

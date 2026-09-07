@@ -82,6 +82,8 @@ lvgl:
   pages:
     # --- Экран 1: выбор сети ---
     - id: page_wifi_list
+      on_load:
+        - script.execute: style_page
       widgets:
         - label:
             text: "Настройка Wi-Fi"
@@ -177,6 +179,8 @@ lvgl:
     # в принципе, и без ручного ввода к ним не подключиться. Обнаружено
     # на живой сети — SRVPRMiot вещает скрыто.
     - id: page_wifi_pass
+      on_load:
+        - script.execute: style_page
       widgets:
         - label:
             text: "Подключение"

@@ -243,6 +243,8 @@ lvgl:
   default_font: f_body      # иначе кнопки унаследуют латинский шрифт LVGL
   pages:
     - id: page_p0
+      on_load:
+        - script.execute: style_page
       widgets:
         - label:
             id: lbl_title

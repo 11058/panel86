@@ -16,6 +16,8 @@ lvgl:
   pages:
     # --- Меню настроек ---
     - id: page_settings
+      on_load:
+        - script.execute: style_page
       widgets:
         - label:
             text: "Настройки"
@@ -127,6 +129,8 @@ lvgl:
     # панели пальцем в прокручиваемый список не попасть, а содержимое
     # уезжает и не возвращается. Лучше два коротких экрана.
     - id: page_display
+      on_load:
+        - script.execute: style_page
       widgets:
         - label: { text: "Экран", align: TOP_MID, y: 64, text_font: f_title, text_color: 0xE3E9EE }
         - button:
@@ -234,6 +238,8 @@ lvgl:
 
     # --- Расписание дня и ночи ---
     - id: page_schedule
+      on_load:
+        - script.execute: style_page
       widgets:
         - label: { text: "Расписание", align: TOP_MID, y: 64, text_font: f_title, text_color: 0xE3E9EE }
         - button:
@@ -352,11 +358,13 @@ lvgl:
 
     # --- Сеть: меню ---
     - id: page_network
+      on_load:
+        - script.execute: style_page
       widgets:
         - label:
             text: "Сеть"
             align: TOP_MID
-            y: 22
+            y: 64
             text_font: f_title
             text_color: 0xE3E9EE
         - button:
@@ -406,11 +414,13 @@ lvgl:
 
     # --- Сеть: состояние ---
     - id: page_netstat
+      on_load:
+        - script.execute: style_page
       widgets:
         - label:
             text: "Состояние сети"
             align: TOP_MID
-            y: 22
+            y: 64
             text_font: f_title
             text_color: 0xE3E9EE
         - button:
@@ -435,11 +445,13 @@ lvgl:
 
     # --- Время ---
     - id: page_time
+      on_load:
+        - script.execute: style_page
       widgets:
         - label:
             text: "Время"
             align: TOP_MID
-            y: 22
+            y: 64
             text_font: f_title
             text_color: 0xE3E9EE
         - button:
@@ -593,11 +605,13 @@ lvgl:
 
     # --- О панели ---
     - id: page_about
+      on_load:
+        - script.execute: style_page
       widgets:
         - label:
             text: "О панели"
             align: TOP_MID
-            y: 22
+            y: 64
             text_font: f_title
             text_color: 0xE3E9EE
         - button:
