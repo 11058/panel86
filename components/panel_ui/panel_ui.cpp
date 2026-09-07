@@ -87,6 +87,14 @@ void PanelUI::setup() {
 }
 
 void PanelUI::loop() {
+  // Перестроение, назначенное из веб-сервера. Здесь мы в главном цикле,
+  // и трогать LVGL безопасно.
+  if (this->rebuild_pending_) {
+    this->rebuild_pending_ = false;
+    ESP_LOGI(TAG, "перестраиваю интерфейс по новой раскладке");
+    this->rebuild();
+  }
+
   // HTTP-сервер нельзя поднимать в setup(): там ещё не инициализирован
   // сетевой стек, и httpd падает с assert failed: xQueueSemaphoreTake.
   // Поэтому лениво, при первом появлении сети.
@@ -314,6 +322,12 @@ static void scroll_event_cb(lv_event_t *e) {
     self->sync_dots();
 }
 
+static void icon_event_cb(lv_event_t *e) {
+  auto *card = static_cast<PanelUI::Card *>(lv_event_get_user_data(e));
+  if (card != nullptr && card->owner != nullptr)
+    card->owner->open_details(card);
+}
+
 static void card_event_cb(lv_event_t *e) {
   auto *card = static_cast<PanelUI::Card *>(lv_event_get_user_data(e));
   if (card != nullptr && card->owner != nullptr)
@@ -389,6 +403,9 @@ void PanelUI::render_card_(void *parent, Card *card, int x, int y, int w, int h)
   lv_obj_set_style_radius(ibox, d / 2, LV_PART_MAIN);
   lv_obj_set_style_bg_color(ibox, accent, LV_PART_MAIN);
   lv_obj_set_style_bg_opa(ibox, LV_OPA_20, LV_PART_MAIN);
+
+  lv_obj_add_flag(ibox, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(ibox, icon_event_cb, LV_EVENT_CLICKED, card);
 
   lv_obj_t *icon = lv_label_create(ibox);
   lv_label_set_text(icon, icon_for(card->type, card->icon_name));
@@ -710,9 +727,10 @@ void PanelUI::render_page_(void *tile, const void *page_json, int w, int h) {
     this->render_card_(par, card, px, py, pw, ph);
 
     // Появление: карточка выезжает снизу и проявляется, с задержкой
-    // по порядку. Страница «собирается» на глазах, а не возникает разом —
-    // так понятнее, из чего она состоит.
-    {
+    // по порядку. Только при первом построении — при заливке раскладки
+    // из редактора экран должен обновиться сразу, а не переигрывать
+    // появление на каждое сохранение.
+    if (this->animate_build_) {
       auto *bx = static_cast<lv_obj_t *>(card->box);
       const uint32_t delay = 40 * static_cast<uint32_t>(this->cards_.size());
       lv_obj_set_style_opa(bx, LV_OPA_TRANSP, LV_PART_MAIN);
@@ -763,6 +781,10 @@ bool PanelUI::build_ui(void *root) {
   this->scroller_ = nullptr;
 
   auto *par = static_cast<lv_obj_t *>(root);
+  // Снимаем все анимации ДО удаления объектов: иначе анимация продолжает
+  // жить на удалённом объекте, а новая карточка остаётся прозрачной —
+  // выглядит так, будто карточки пропали с экрана.
+  lv_anim_delete_all();
   lv_obj_clean(par);
 
   // Размеры надо запрашивать ПОСЛЕ пересчёта раскладки: на on_boot LVGL
@@ -866,6 +888,9 @@ bool PanelUI::build_ui(void *root) {
     ESP_LOGE(TAG, "раскладка не разобрана");
     return false;
   }
+  // Появление показываем один раз, при первом построении. Дальше правки
+  // из редактора применяются мгновенно.
+  this->animate_build_ = false;
   ESP_LOGI(TAG, "построено страниц: %u, карточек: %u", (unsigned) n_pages, (unsigned) this->cards_.size());
   return true;
 }
@@ -910,6 +935,268 @@ void PanelUI::bind_entities() {
 #else
   ESP_LOGW(TAG, "API выключен — привязка невозможна");
 #endif
+}
+
+void PanelUI::call_service(const std::string &service, const char *key, const std::string &value) {
+#ifdef USE_API
+  if (this->sheet_card_ == nullptr && key != nullptr)
+    return;
+  api::HomeassistantActionRequest req;
+  req.service = StringRef(service);
+  const std::string ent = this->sheet_card_ != nullptr ? this->sheet_card_->entity : std::string();
+  req.data.init(key != nullptr ? 2 : 1);
+  api::HomeassistantServiceMap kv;
+  kv.key = StringRef("entity_id");
+  kv.value = StringRef(ent);
+  req.data.push_back(kv);
+  if (key != nullptr) {
+    api::HomeassistantServiceMap kv2;
+    kv2.key = StringRef(key);
+    kv2.value = StringRef(value);
+    req.data.push_back(kv2);
+  }
+  ESP_LOGI(TAG, "действие: %s %s%s%s", service.c_str(), ent.c_str(), key ? " " : "",
+           key ? value.c_str() : "");
+  api::global_api_server->send_homeassistant_action(req);
+#endif
+}
+
+static void sheet_close_cb(lv_event_t *e) {
+  auto *self = static_cast<PanelUI *>(lv_event_get_user_data(e));
+  if (self != nullptr)
+    self->close_details();
+}
+
+void PanelUI::close_details() {
+  if (this->sheet_ == nullptr)
+    return;
+  lv_obj_delete(static_cast<lv_obj_t *>(this->sheet_));
+  this->sheet_ = nullptr;
+  this->sheet_card_ = nullptr;
+}
+
+void PanelUI::open_details(Card *card) {
+  this->close_details();
+  if (card == nullptr || card->entity.empty())
+    return;
+  this->sheet_card_ = card;
+
+  lv_obj_t *top = lv_layer_top();
+  lv_display_t *disp = lv_display_get_default();
+  const int W = disp ? lv_display_get_horizontal_resolution(disp) : 720;
+  const int H = disp ? lv_display_get_vertical_resolution(disp) : 720;
+
+  // Затемнение под панелью: касание мимо закрывает. Так подробности
+  // не превращаются в ловушку, из которой не выйти.
+  lv_obj_t *scrim = lv_obj_create(top);
+  lv_obj_remove_style_all(scrim);
+  lv_obj_set_size(scrim, W, H);
+  lv_obj_set_pos(scrim, 0, 0);
+  lv_obj_set_style_bg_color(scrim, lv_color_hex(0x000000), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(scrim, LV_OPA_60, LV_PART_MAIN);
+  lv_obj_add_flag(scrim, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(scrim, sheet_close_cb, LV_EVENT_CLICKED, this);
+  this->sheet_ = scrim;
+
+  const int SH = 440;
+  lv_obj_t *sheet = lv_obj_create(scrim);
+  lv_obj_set_size(sheet, W, SH);
+  lv_obj_set_pos(sheet, 0, H - SH);
+  lv_obj_set_style_radius(sheet, 34, LV_PART_MAIN);
+  lv_obj_set_style_border_width(sheet, 0, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(sheet, lv_color_hex(card_bg()), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(sheet, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_pad_all(sheet, 24, LV_PART_MAIN);
+  lv_obj_clear_flag(sheet, LV_OBJ_FLAG_SCROLLABLE);
+
+  const lv_color_t acc = accent_for(card->type);
+
+  lv_obj_t *ib = lv_obj_create(sheet);
+  lv_obj_remove_style_all(ib);
+  lv_obj_set_size(ib, 76, 76);
+  lv_obj_align(ib, LV_ALIGN_TOP_LEFT, 0, 0);
+  lv_obj_set_style_radius(ib, 38, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(ib, acc, LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(ib, card->active ? LV_OPA_COVER : LV_OPA_20, LV_PART_MAIN);
+  lv_obj_t *ic = lv_label_create(ib);
+  lv_label_set_text(ic, icon_for(card->type, card->icon_name));
+  lv_obj_center(ic);
+  lv_obj_set_style_text_color(ic, card->active ? lv_color_hex(card_bg_page()) : acc, LV_PART_MAIN);
+  if (this->font_icon_ != nullptr)
+    lv_obj_set_style_text_font(ic, static_cast<const lv_font_t *>(this->font_icon_), LV_PART_MAIN);
+
+  lv_obj_t *ttl = lv_label_create(sheet);
+  lv_label_set_text(ttl, card->label.c_str());
+  lv_label_set_long_mode(ttl, LV_LABEL_LONG_DOT);
+  lv_obj_set_width(ttl, W - 48 - 100);
+  lv_obj_align(ttl, LV_ALIGN_TOP_LEFT, 100, 8);
+  lv_obj_set_style_text_color(ttl, lv_color_hex(card_ink()), LV_PART_MAIN);
+  if (this->font_title_ != nullptr)
+    lv_obj_set_style_text_font(ttl, static_cast<const lv_font_t *>(this->font_title_), LV_PART_MAIN);
+
+  lv_obj_t *ent = lv_label_create(sheet);
+  lv_label_set_text(ent, card->entity.c_str());
+  lv_label_set_long_mode(ent, LV_LABEL_LONG_DOT);
+  lv_obj_set_width(ent, W - 48 - 100);
+  lv_obj_align(ent, LV_ALIGN_TOP_LEFT, 100, 48);
+  lv_obj_set_style_text_color(ent, lv_color_hex(card_ink3()), LV_PART_MAIN);
+  if (this->font_small_ != nullptr)
+    lv_obj_set_style_text_font(ent, static_cast<const lv_font_t *>(this->font_small_), LV_PART_MAIN);
+
+  // Кнопка закрытия — крупная: у стены в неё надо попадать не глядя.
+  lv_obj_t *cl = lv_button_create(sheet);
+  lv_obj_set_size(cl, 96, 62);
+  lv_obj_align(cl, LV_ALIGN_TOP_RIGHT, 0, 0);
+  lv_obj_set_style_radius(cl, 31, LV_PART_MAIN);
+  lv_obj_add_event_cb(cl, sheet_close_cb, LV_EVENT_CLICKED, this);
+  lv_obj_t *cll = lv_label_create(cl);
+  lv_label_set_text(cll, "Закрыть");
+  lv_obj_center(cll);
+  if (this->font_small_ != nullptr)
+    lv_obj_set_style_text_font(cll, static_cast<const lv_font_t *>(this->font_small_), LV_PART_MAIN);
+
+  this->build_details_controls(sheet, card, W - 48);
+}
+
+// Кнопка в подробностях: подпись плюс действие. Действие хранится в самой
+// кнопке, чтобы не заводить отдельную структуру на каждую.
+struct SheetAction {
+  PanelUI *self;
+  std::string service;
+  std::string key;
+  std::string value;
+};
+
+static void sheet_action_cb(lv_event_t *e) {
+  auto *a = static_cast<SheetAction *>(lv_event_get_user_data(e));
+  if (a == nullptr)
+    return;
+  a->self->call_service(a->service, a->key.empty() ? nullptr : a->key.c_str(), a->value);
+}
+
+static void sheet_action_free_cb(lv_event_t *e) {
+  delete static_cast<SheetAction *>(lv_event_get_user_data(e));
+}
+
+static lv_obj_t *sheet_button(lv_obj_t *parent, PanelUI *self, const char *text, int x, int y, int w,
+                              int h, const std::string &service, const char *key, const std::string &value,
+                              const void *font) {
+  lv_obj_t *b = lv_button_create(parent);
+  lv_obj_set_size(b, w, h);
+  lv_obj_set_pos(b, x, y);
+  lv_obj_set_style_radius(b, h / 2, LV_PART_MAIN);
+  lv_obj_t *l = lv_label_create(b);
+  lv_label_set_text(l, text);
+  lv_obj_center(l);
+  if (font != nullptr)
+    lv_obj_set_style_text_font(l, static_cast<const lv_font_t *>(font), LV_PART_MAIN);
+
+  auto *a = new SheetAction{self, service, key != nullptr ? key : "", value};  // NOLINT
+  lv_obj_add_event_cb(b, sheet_action_cb, LV_EVENT_CLICKED, a);
+  lv_obj_add_event_cb(b, sheet_action_free_cb, LV_EVENT_DELETE, a);
+  return b;
+}
+
+static void sheet_slider_cb(lv_event_t *e) {
+  auto *a = static_cast<SheetAction *>(lv_event_get_user_data(e));
+  auto *sl = static_cast<lv_obj_t *>(lv_event_get_target(e));
+  if (a == nullptr || sl == nullptr)
+    return;
+  a->self->call_service(a->service, a->key.c_str(), std::to_string((int) lv_slider_get_value(sl)));
+}
+
+void PanelUI::build_details_controls(void *sheet_v, Card *card, int width) {
+  auto *sheet = static_cast<lv_obj_t *>(sheet_v);
+  const int Y0 = 120;
+  const int BH = 78;
+  const std::string dom = card->entity.substr(0, card->entity.find('.'));
+
+  if (card->type == "light") {
+    // Яркость — главное, ради чего сюда заходят.
+    lv_obj_t *cap = lv_label_create(sheet);
+    lv_label_set_text(cap, "Яркость");
+    lv_obj_set_pos(cap, 0, Y0);
+    lv_obj_set_style_text_color(cap, lv_color_hex(card_ink2()), LV_PART_MAIN);
+    if (this->font_small_ != nullptr)
+      lv_obj_set_style_text_font(cap, static_cast<const lv_font_t *>(this->font_small_), LV_PART_MAIN);
+
+    lv_obj_t *sl = lv_slider_create(sheet);
+    lv_obj_set_size(sl, width, 46);
+    lv_obj_set_pos(sl, 0, Y0 + 34);
+    lv_slider_set_range(sl, 1, 100);
+    lv_slider_set_value(sl, card->level > 0 ? card->level : 50, LV_ANIM_OFF);
+    lv_obj_set_style_radius(sl, 23, LV_PART_MAIN);
+    lv_obj_set_style_radius(sl, 23, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(sl, accent_for(card->type), LV_PART_INDICATOR);
+    auto *a = new SheetAction{this, "light.turn_on", "brightness_pct", ""};  // NOLINT
+    lv_obj_add_event_cb(sl, sheet_slider_cb, LV_EVENT_RELEASED, a);
+    lv_obj_add_event_cb(sl, sheet_action_free_cb, LV_EVENT_DELETE, a);
+
+    const int bw = (width - 16) / 2;
+    sheet_button(sheet, this, "Включить", 0, Y0 + 108, bw, BH, "light.turn_on", nullptr, "",
+                 this->font_value_);
+    sheet_button(sheet, this, "Выключить", bw + 16, Y0 + 108, bw, BH, "light.turn_off", nullptr, "",
+                 this->font_value_);
+
+  } else if (card->type == "switch" || card->type == "valve" || card->type == "lock") {
+    const int bw = (width - 16) / 2;
+    const std::string on = dom + (card->type == "lock" ? ".unlock" : ".turn_on");
+    const std::string off = dom + (card->type == "lock" ? ".lock" : ".turn_off");
+    sheet_button(sheet, this, card->type == "lock" ? "Открыть" : "Включить", 0, Y0, bw, BH, on,
+                 nullptr, "", this->font_value_);
+    sheet_button(sheet, this, card->type == "lock" ? "Закрыть" : "Выключить", bw + 16, Y0, bw, BH,
+                 off, nullptr, "", this->font_value_);
+
+  } else if (card->type == "cover") {
+    const int bw = (width - 32) / 3;
+    sheet_button(sheet, this, "Вверх", 0, Y0, bw, BH, "cover.open_cover", nullptr, "", this->font_value_);
+    sheet_button(sheet, this, "Стоп", bw + 16, Y0, bw, BH, "cover.stop_cover", nullptr, "",
+                 this->font_value_);
+    sheet_button(sheet, this, "Вниз", 2 * (bw + 16), Y0, bw, BH, "cover.close_cover", nullptr, "",
+                 this->font_value_);
+
+  } else if (card->type == "climate") {
+    lv_obj_t *cap = lv_label_create(sheet);
+    lv_label_set_text(cap, "Уставка");
+    lv_obj_set_pos(cap, 0, Y0);
+    lv_obj_set_style_text_color(cap, lv_color_hex(card_ink2()), LV_PART_MAIN);
+    if (this->font_small_ != nullptr)
+      lv_obj_set_style_text_font(cap, static_cast<const lv_font_t *>(this->font_small_), LV_PART_MAIN);
+
+    lv_obj_t *sl = lv_slider_create(sheet);
+    lv_obj_set_size(sl, width, 46);
+    lv_obj_set_pos(sl, 0, Y0 + 34);
+    lv_slider_set_range(sl, 5, 35);
+    lv_slider_set_value(sl, 22, LV_ANIM_OFF);
+    lv_obj_set_style_radius(sl, 23, LV_PART_MAIN);
+    lv_obj_set_style_radius(sl, 23, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(sl, accent_for(card->type), LV_PART_INDICATOR);
+    auto *a = new SheetAction{this, "climate.set_temperature", "temperature", ""};  // NOLINT
+    lv_obj_add_event_cb(sl, sheet_slider_cb, LV_EVENT_RELEASED, a);
+    lv_obj_add_event_cb(sl, sheet_action_free_cb, LV_EVENT_DELETE, a);
+
+    const int bw = (width - 16) / 2;
+    sheet_button(sheet, this, "Нагрев", 0, Y0 + 108, bw, BH, "climate.set_hvac_mode", "hvac_mode",
+                 "heat", this->font_value_);
+    sheet_button(sheet, this, "Выключить", bw + 16, Y0 + 108, bw, BH, "climate.set_hvac_mode",
+                 "hvac_mode", "off", this->font_value_);
+
+  } else if (card->type == "scene" || card->type == "script") {
+    sheet_button(sheet, this, "Запустить", 0, Y0, width, BH, dom + ".turn_on", nullptr, "",
+                 this->font_value_);
+
+  } else {
+    // Датчики и всё прочее: управлять нечем, показываем текущее значение
+    // крупно — ради этого сюда тоже заходят.
+    lv_obj_t *big = lv_label_create(sheet);
+    lv_label_set_text(big, card->lbl_value != nullptr
+                               ? lv_label_get_text(static_cast<lv_obj_t *>(card->lbl_value))
+                               : "—");
+    lv_obj_set_pos(big, 0, Y0 + 10);
+    lv_obj_set_style_text_color(big, lv_color_hex(card_ink()), LV_PART_MAIN);
+    if (this->font_title_ != nullptr)
+      lv_obj_set_style_text_font(big, static_cast<const lv_font_t *>(this->font_title_), LV_PART_MAIN);
+  }
 }
 
 void PanelUI::on_card_tapped(Card *card) {
@@ -1092,6 +1379,10 @@ static esp_err_t handle_ha_entities(httpd_req_t *req) {
 // файл пришлось бы держать на диске и вручную вписывать в него адрес.
 static esp_err_t handle_get_editor(httpd_req_t *req) {
   add_cors(req);
+  // Без этого браузер держит старую страницу после обновления прошивки,
+  // и человек правит интерфейс, которого уже нет.
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store, must-revalidate");
+  httpd_resp_set_hdr(req, "Pragma", "no-cache");
   httpd_resp_set_type(req, "text/html; charset=utf-8");
   return httpd_resp_send(req, EDITOR_HTML, HTTPD_RESP_USE_STRLEN);
 }
@@ -1209,11 +1500,13 @@ static esp_err_t handle_post_layout(httpd_req_t *req) {
     return httpd_resp_sendstr(req, "{\"error\":\"не удалось сохранить\"}");
   }
 
-  const bool built = self->rebuild();
+  // Перестроение НЕ здесь: мы в задаче веб-сервера, а LVGL не потокобезопасен.
+  // Ставим отметку, главный цикл подхватит её в своём такте.
+  self->request_rebuild();
+
   httpd_resp_set_type(req, "application/json");
   char out[128];
-  snprintf(out, sizeof(out), "{\"saved\":%u,\"cards\":%u,\"rebuilt\":%s}", (unsigned) body.size(),
-           (unsigned) self->card_count(), built ? "true" : "false");
+  snprintf(out, sizeof(out), "{\"saved\":%u,\"rebuilt\":\"queued\"}", (unsigned) body.size());
   return httpd_resp_sendstr(req, out);
 }
 

@@ -135,11 +135,25 @@ class PanelUI : public Component {
   /// Нажатие на карточку: переключить сущность в Home Assistant.
   void on_card_tapped(Card *card);
 
+  /// Нажатие на иконку: открыть подробности. Как в Bubble Card — само
+  /// нажатие переключает, а подробности прячутся за иконкой, чтобы
+  /// не мешать основному действию.
+  void open_details(Card *card);
+  void close_details();
+
+  /// Вызвать действие Home Assistant с одним параметром сверх entity_id.
+  void call_service(const std::string &service, const char *key = nullptr,
+                    const std::string &value = "");
+
   size_t card_count() const { return this->cards_.size(); }
 
   /// Перестроить интерфейс из того, что сейчас лежит в файле.
   /// Используется после заливки новой раскладки по HTTP.
   bool rebuild();
+
+  /// Назначить перестроение. Безопасно вызывать из любой задачи: сама
+  /// работа произойдёт в главном цикле.
+  void request_rebuild() { this->rebuild_pending_ = true; }
 
  protected:
   void render_page_(void *tile, const void *page_json, int w, int h);
@@ -148,10 +162,13 @@ class PanelUI : public Component {
   void update_card_level_(Card *card, int level);
   void apply_state_(Card *card, const std::string &state);
   void start_http_();
+  void build_details_controls(void *sheet, Card *card, int width);
 
   std::vector<Card *> cards_;
   std::vector<void *> dots_;   // lv_obj_t * — индикатор страниц
   void *scroller_{nullptr};    // lv_obj_t *
+  void *sheet_{nullptr};       // lv_obj_t * — панель подробностей
+  Card *sheet_card_{nullptr};
   const char *partition_{"storage"};
   const char *base_path_{"/fs"};
   const char *layout_file_{"layout.json"};
@@ -172,6 +189,11 @@ class PanelUI : public Component {
   void *httpd_{nullptr};  // httpd_handle_t
   bool mounted_{false};
   bool http_started_{false};
+  bool animate_build_{true};
+  // Перестроение назначается из задачи веб-сервера, а выполняется в главном
+  // цикле: LVGL не потокобезопасен, и трогать его виджеты из другой задачи
+  // одновременно с отрисовкой — гарантированная гонка.
+  volatile bool rebuild_pending_{false};
   uint32_t settings_rev_{0};
 
   // Разобранные настройки
