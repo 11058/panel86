@@ -51,6 +51,10 @@ class PanelUI : public Component {
   int  sleep_brightness() const { return this->s_sleep_brightness_; }
   uint32_t sleep_after_ms() const { return this->s_sleep_after_ms_; }
   bool wake_on_motion() const { return this->s_wake_on_motion_; }
+  int  day_start_hour() const { return this->s_day_start_; }
+  int  night_start_hour() const { return this->s_night_start_; }
+  bool day_always_on() const { return this->s_day_always_on_; }
+  bool night_off() const { return this->s_night_off_; }
   const std::string &theme() const { return this->s_theme_; }
   const std::string &time_source() const { return this->s_time_source_; }
   const std::string &ntp_server() const { return this->s_ntp_server_; }
@@ -156,6 +160,10 @@ class PanelUI : public Component {
   int s_sleep_brightness_{10};
   uint32_t s_sleep_after_ms_{60000};
   bool s_wake_on_motion_{true};
+  int  s_day_start_{7};        // час начала «дня»
+  int  s_night_start_{23};     // час начала «ночи»
+  bool s_day_always_on_{false};
+  bool s_night_off_{true};
   std::string s_theme_{"dark"};
   std::string s_time_source_{"sntp"};
   std::string s_ntp_server_{"pool.ntp.org"};

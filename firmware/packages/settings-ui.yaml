@@ -20,13 +20,13 @@ lvgl:
         - label:
             text: "Настройки"
             align: TOP_MID
-            y: 22
+            y: 64
             text_font: f_title
             text_color: 0xE3E9EE
         - button:
             align: TOP_LEFT
             x: 20
-            y: 18
+            y: 58
             width: 130
             height: 50
             bg_color: 0x222B33
@@ -40,7 +40,7 @@ lvgl:
 
         - button:
             align: TOP_MID
-            y: 90
+            y: 128
             width: 620
             height: 84
             bg_color: 0x161C22
@@ -62,7 +62,7 @@ lvgl:
 
         - button:
             align: TOP_MID
-            y: 186
+            y: 224
             width: 620
             height: 84
             bg_color: 0x161C22
@@ -84,7 +84,7 @@ lvgl:
 
         - button:
             align: TOP_MID
-            y: 282
+            y: 320
             width: 620
             height: 84
             bg_color: 0x161C22
@@ -107,7 +107,7 @@ lvgl:
 
         - button:
             align: TOP_MID
-            y: 378
+            y: 416
             width: 620
             height: 84
             bg_color: 0x161C22
@@ -122,50 +122,33 @@ lvgl:
               - lvgl.page.show: page_about
 
     # --- Экран ---
+    #
+    # Сознательно две страницы вместо одной с прокруткой: на настенной
+    # панели пальцем в прокручиваемый список не попасть, а содержимое
+    # уезжает и не возвращается. Лучше два коротких экрана.
     - id: page_display
       widgets:
-        - label:
-            text: "Экран"
-            align: TOP_MID
-            y: 22
-            text_font: f_title
-            text_color: 0xE3E9EE
+        - label: { text: "Экран", align: TOP_MID, y: 64, text_font: f_title, text_color: 0xE3E9EE }
         - button:
             align: TOP_LEFT
             x: 20
-            y: 18
+            y: 58
             width: 130
             height: 50
             bg_color: 0x222B33
             widgets:
-              - label:
-                  text: "Назад"
-                  align: CENTER
-                  text_color: 0xE3E9EE
+              - label: { text: "Назад", align: CENTER, text_color: 0xE3E9EE }
             on_click:
               - lvgl.page.show: page_settings
 
-        - label:
-            text: "Яркость"
-            align: TOP_LEFT
-            x: 40
-            y: 100
-            text_font: f_body
-            text_color: 0x9AA8B4
-        - label:
-            id: lbl_bright
-            text: "80 %"
-            align: TOP_RIGHT
-            x: -40
-            y: 100
-            text_font: f_body
-            text_color: 0xE9A45C
+        - label: { text: "Яркость", align: TOP_LEFT, x: 40, y: 140, text_font: f_body, text_color: 0x9AA8B4 }
+        - label: { id: lbl_bright, text: "80 %", align: TOP_RIGHT, x: -40, y: 140, text_font: f_body, text_color: 0xE9A45C }
         - slider:
             id: sld_bright
             align: TOP_MID
-            y: 140
+            y: 182
             width: 620
-            height: 26
+            height: 30
             min_value: 10
             max_value: 100
             value: 80
@@ -173,8 +156,6 @@ lvgl:
               - lambda: |-
                   int v = (int) x;
                   lv_label_set_text_fmt(id(lbl_bright), "%d %%", v);
-                  // Применяем сразу: настройка яркости должна быть видна
-                  // в момент движения ползунка, а не после сохранения.
                   auto call = id(backlight).turn_on();
                   call.set_brightness(v / 100.0f);
                   call.perform();
@@ -183,27 +164,14 @@ lvgl:
                   id(panel_storage)->set_setting("display", "brightness",
                                                  std::to_string((int) lv_slider_get_value(id(sld_bright))));
 
-        - label:
-            text: "Гаснуть через"
-            align: TOP_LEFT
-            x: 40
-            y: 210
-            text_font: f_body
-            text_color: 0x9AA8B4
-        - label:
-            id: lbl_sleep
-            text: "1 мин"
-            align: TOP_RIGHT
-            x: -40
-            y: 210
-            text_font: f_body
-            text_color: 0xE9A45C
+        - label: { text: "Гаснуть через", align: TOP_LEFT, x: 40, y: 250, text_font: f_body, text_color: 0x9AA8B4 }
+        - label: { id: lbl_sleep, text: "1 мин", align: TOP_RIGHT, x: -40, y: 250, text_font: f_body, text_color: 0xE9A45C }
         - slider:
             id: sld_sleep
             align: TOP_MID
-            y: 250
+            y: 292
             width: 620
-            height: 26
+            height: 30
             min_value: 0
             max_value: 6
             value: 2
@@ -219,27 +187,14 @@ lvgl:
                   if (i < 0) i = 0; if (i > 6) i = 6;
                   id(panel_storage)->set_setting("display", "sleep_after", VALS[i]);
 
-        - label:
-            text: "Яркость в спящем режиме"
-            align: TOP_LEFT
-            x: 40
-            y: 320
-            text_font: f_small
-            text_color: 0x9AA8B4
-        - label:
-            id: lbl_dim
-            text: "10 %"
-            align: TOP_RIGHT
-            x: -40
-            y: 318
-            text_font: f_body
-            text_color: 0xE9A45C
+        - label: { text: "Яркость в спящем режиме", align: TOP_LEFT, x: 40, y: 360, text_font: f_small, text_color: 0x9AA8B4 }
+        - label: { id: lbl_dim, text: "10 %", align: TOP_RIGHT, x: -40, y: 358, text_font: f_body, text_color: 0xE9A45C }
         - slider:
             id: sld_dim
             align: TOP_MID
-            y: 352
+            y: 396
             width: 620
-            height: 26
+            height: 30
             min_value: 0
             max_value: 60
             value: 10
@@ -250,42 +205,13 @@ lvgl:
                   id(panel_storage)->set_setting("display", "sleep_brightness",
                                                  std::to_string((int) lv_slider_get_value(id(sld_dim))));
 
-        - label:
-            text: "Будить датчиком движения"
-            align: TOP_LEFT
-            x: 40
-            y: 420
-            text_font: f_small
-            text_color: 0x9AA8B4
-        - label:
-            text: "датчик пока не подключён"
-            align: TOP_LEFT
-            x: 40
-            y: 448
-            text_font: f_small
-            text_color: 0x6B7B88
-        - switch:
-            id: sw_motion
-            align: TOP_RIGHT
-            x: -40
-            y: 420
-            on_value:
-              - lambda: |-
-                  id(panel_storage)->set_setting("display", "wake_on_motion", x ? "true" : "false");
-
-        - label:
-            text: "Тема"
-            align: TOP_LEFT
-            x: 40
-            y: 500
-            text_font: f_body
-            text_color: 0x9AA8B4
+        - label: { text: "Тема", align: TOP_LEFT, x: 40, y: 468, text_font: f_body, text_color: 0x9AA8B4 }
         - dropdown:
             id: dd_theme
             align: TOP_RIGHT
             x: -40
-            y: 496
-            width: 260
+            y: 462
+            width: 280
             options:
               - "Тёмная"
               - "Светлая"
@@ -293,6 +219,136 @@ lvgl:
               - lambda: |-
                   id(panel_storage)->set_setting("display", "theme",
                                                  lv_dropdown_get_selected(id(dd_theme)->obj) == 0 ? "dark" : "light");
+              - script.execute: apply_theme
+
+        - button:
+            align: BOTTOM_MID
+            y: -30
+            width: 620
+            height: 76
+            bg_color: 0x161C22
+            widgets:
+              - label: { text: "Расписание и присутствие", align: LEFT_MID, x: 20, text_font: f_body, text_color: 0xE3E9EE }
+            on_click:
+              - lvgl.page.show: page_schedule
+
+    # --- Расписание дня и ночи ---
+    - id: page_schedule
+      widgets:
+        - label: { text: "Расписание", align: TOP_MID, y: 64, text_font: f_title, text_color: 0xE3E9EE }
+        - button:
+            align: TOP_LEFT
+            x: 20
+            y: 58
+            width: 130
+            height: 50
+            bg_color: 0x222B33
+            widgets:
+              - label: { text: "Назад", align: CENTER, text_color: 0xE3E9EE }
+            on_click:
+              - lvgl.page.show: page_display
+
+        - label: { text: "День начинается", align: TOP_LEFT, x: 40, y: 146, text_font: f_body, text_color: 0x9AA8B4 }
+        - dropdown:
+            id: dd_day
+            align: TOP_RIGHT
+            x: -40
+            y: 140
+            width: 220
+            options:
+              - "00:00"
+              - "01:00"
+              - "02:00"
+              - "03:00"
+              - "04:00"
+              - "05:00"
+              - "06:00"
+              - "07:00"
+              - "08:00"
+              - "09:00"
+              - "10:00"
+              - "11:00"
+              - "12:00"
+              - "13:00"
+              - "14:00"
+              - "15:00"
+              - "16:00"
+              - "17:00"
+              - "18:00"
+              - "19:00"
+              - "20:00"
+              - "21:00"
+              - "22:00"
+              - "23:00"
+            on_value:
+              - lambda: |-
+                  id(panel_storage)->set_setting("display", "day_start",
+                      std::to_string((int) lv_dropdown_get_selected(id(dd_day)->obj)));
+
+        - label: { text: "Ночь начинается", align: TOP_LEFT, x: 40, y: 226, text_font: f_body, text_color: 0x9AA8B4 }
+        - dropdown:
+            id: dd_night
+            align: TOP_RIGHT
+            x: -40
+            y: 220
+            width: 220
+            options:
+              - "00:00"
+              - "01:00"
+              - "02:00"
+              - "03:00"
+              - "04:00"
+              - "05:00"
+              - "06:00"
+              - "07:00"
+              - "08:00"
+              - "09:00"
+              - "10:00"
+              - "11:00"
+              - "12:00"
+              - "13:00"
+              - "14:00"
+              - "15:00"
+              - "16:00"
+              - "17:00"
+              - "18:00"
+              - "19:00"
+              - "20:00"
+              - "21:00"
+              - "22:00"
+              - "23:00"
+            on_value:
+              - lambda: |-
+                  id(panel_storage)->set_setting("display", "night_start",
+                      std::to_string((int) lv_dropdown_get_selected(id(dd_night)->obj)));
+
+        - label: { text: "Днём не гаснуть", align: TOP_LEFT, x: 40, y: 316, text_font: f_body, text_color: 0x9AA8B4 }
+        - switch:
+            id: sw_day_on
+            align: TOP_RIGHT
+            x: -40
+            y: 310
+            on_value:
+              - lambda: 'id(panel_storage)->set_setting("display", "day_always_on", x ? "true" : "false");'
+
+        - label: { text: "Ночью гаснуть полностью", align: TOP_LEFT, x: 40, y: 396, text_font: f_body, text_color: 0x9AA8B4 }
+        - switch:
+            id: sw_night_off
+            align: TOP_RIGHT
+            x: -40
+            y: 390
+            on_value:
+              - lambda: 'id(panel_storage)->set_setting("display", "night_off", x ? "true" : "false");'
+
+        - label: { text: "Будить датчиком движения", align: TOP_LEFT, x: 40, y: 476, text_font: f_body, text_color: 0x9AA8B4 }
+        - label: { text: "датчик пока не подключён", align: TOP_LEFT, x: 40, y: 508, text_font: f_small, text_color: 0x6B7B88 }
+        - switch:
+            id: sw_motion
+            align: TOP_RIGHT
+            x: -40
+            y: 472
+            on_value:
+              - lambda: 'id(panel_storage)->set_setting("display", "wake_on_motion", x ? "true" : "false");'
 
     # --- Сеть: меню ---
     - id: page_network
@@ -306,7 +362,7 @@ lvgl:
         - button:
             align: TOP_LEFT
             x: 20
-            y: 18
+            y: 58
             width: 130
             height: 50
             bg_color: 0x222B33
@@ -316,7 +372,7 @@ lvgl:
               - lvgl.page.show: page_settings
         - button:
             align: TOP_MID
-            y: 90
+            y: 128
             width: 620
             height: 84
             bg_color: 0x161C22
@@ -327,7 +383,7 @@ lvgl:
               - lvgl.page.show: page_wifi_list
         - button:
             align: TOP_MID
-            y: 186
+            y: 224
             width: 620
             height: 84
             bg_color: 0x161C22
@@ -338,7 +394,7 @@ lvgl:
               - lvgl.page.show: page_netstat
         - button:
             align: TOP_MID
-            y: 282
+            y: 320
             width: 620
             height: 84
             bg_color: 0x161C22
@@ -360,7 +416,7 @@ lvgl:
         - button:
             align: TOP_LEFT
             x: 20
-            y: 18
+            y: 58
             width: 130
             height: 50
             bg_color: 0x222B33
@@ -373,7 +429,7 @@ lvgl:
             text: "—"
             align: TOP_LEFT
             x: 40
-            y: 92
+            y: 128
             text_font: f_small
             text_color: 0xE3E9EE
 
@@ -389,7 +445,7 @@ lvgl:
         - button:
             align: TOP_LEFT
             x: 20
-            y: 18
+            y: 58
             width: 130
             height: 50
             bg_color: 0x222B33
@@ -398,12 +454,12 @@ lvgl:
             on_click:
               - lvgl.page.show: page_settings
 
-        - label: { text: "Источник", align: TOP_LEFT, x: 40, y: 110, text_font: f_body, text_color: 0x9AA8B4 }
+        - label: { text: "Источник", align: TOP_LEFT, x: 40, y: 148, text_font: f_body, text_color: 0x9AA8B4 }
         - dropdown:
             id: dd_time_src
             align: TOP_RIGHT
             x: -40
-            y: 106
+            y: 144
             width: 300
             options:
               - "Интернет (NTP)"
@@ -413,12 +469,12 @@ lvgl:
                   id(panel_storage)->set_setting("time", "source",
                       lv_dropdown_get_selected(id(dd_time_src)->obj) == 0 ? "sntp" : "homeassistant");
 
-        - label: { text: "Сервер NTP", align: TOP_LEFT, x: 40, y: 190, text_font: f_body, text_color: 0x9AA8B4 }
+        - label: { text: "Сервер NTP", align: TOP_LEFT, x: 40, y: 226, text_font: f_body, text_color: 0x9AA8B4 }
         - dropdown:
             id: dd_ntp
             align: TOP_RIGHT
             x: -40
-            y: 186
+            y: 222
             width: 300
             # Список, а не поле ввода: вторая LVGL-клавиатура в прошивке
             # приводила к зависанию loopTask (см. docs/01-p0-bringup.md),
@@ -440,32 +496,98 @@ lvgl:
                   // в esp_sntp мимо компонента — напрашиваться на гонку.
                   ESP_LOGI("settings", "сервер NTP: %s (применится после перезагрузки)", S[i]);
 
-        - label: { text: "Часовой пояс", align: TOP_LEFT, x: 40, y: 270, text_font: f_body, text_color: 0x9AA8B4 }
+        - label: { text: "Часовой пояс", align: TOP_LEFT, x: 40, y: 304, text_font: f_body, text_color: 0x9AA8B4 }
         - dropdown:
             id: dd_tz
             align: TOP_RIGHT
             x: -40
-            y: 266
+            y: 300
             width: 300
             options:
-              - "Екатеринбург"
-              - "Москва"
-              - "Новосибирск"
-              - "Владивосток"
+              - "GMT-12"
+              - "GMT-11"
+              - "GMT-10"
+              - "GMT-9"
+              - "GMT-8"
+              - "GMT-7"
+              - "GMT-6"
+              - "GMT-5"
+              - "GMT-4"
+              - "GMT-3"
+              - "GMT-2"
+              - "GMT-1"
+              - "GMT"
+              - "GMT+1"
+              - "GMT+2"
+              - "GMT+3"
+              - "GMT+4"
+              - "GMT+5"
+              - "GMT+6"
+              - "GMT+7"
+              - "GMT+8"
+              - "GMT+9"
+              - "GMT+10"
+              - "GMT+11"
+              - "GMT+12"
+              - "GMT+13"
+              - "GMT+14"
             on_value:
               - lambda: |-
-                  static const char *const TZ[] = {"Asia/Yekaterinburg","Europe/Moscow",
-                                                   "Asia/Novosibirsk","Asia/Vladivostok"};
+                  // В POSIX-строке знак смещения ИНВЕРТИРОВАН: GMT+5
+                  // записывается как "UTC-5". Перепутать — получить
+                  // расхождение на двойное смещение.
+                  static const char *const TZ[] = {"UTC+12","UTC+11","UTC+10","UTC+9","UTC+8","UTC+7","UTC+6","UTC+5","UTC+4","UTC+3","UTC+2","UTC+1","UTC","UTC-1","UTC-2","UTC-3","UTC-4","UTC-5","UTC-6","UTC-7","UTC-8","UTC-9","UTC-10","UTC-11","UTC-12","UTC-13","UTC-14"};
                   int i = (int) lv_dropdown_get_selected(id(dd_tz)->obj);
-                  if (i < 0 || i > 3) i = 0;
+                  if (i < 0 || i > 26) i = 0;
                   id(panel_storage)->set_setting("time", "timezone", TZ[i]);
                   id(sntp_time).set_timezone(TZ[i]);
+                  ESP_LOGI("settings", "часовой пояс: %s", TZ[i]);
+
+        - label: { text: "Синхронизировать", align: TOP_LEFT, x: 40, y: 382, text_font: f_body, text_color: 0x9AA8B4 }
+        - dropdown:
+            id: dd_sync
+            align: TOP_RIGHT
+            x: -40
+            y: 378
+            width: 300
+            options:
+              - "каждый час"
+              - "каждые 6 часов"
+              - "раз в сутки"
+              - "только вручную"
+            on_value:
+              - lambda: |-
+                  static const uint32_t MS[] = {3600000u, 21600000u, 86400000u, 4294967295u};
+                  int i = (int) lv_dropdown_get_selected(id(dd_sync)->obj);
+                  if (i < 0 || i > 3) i = 0;
+                  id(sntp_time).set_update_interval(MS[i]);
+                  static const char *const NAMES[] = {"1h","6h","24h","never"};
+                  id(panel_storage)->set_setting("time", "sync_every", NAMES[i]);
+
+        - button:
+            id: btn_sync_now
+            align: TOP_MID
+            y: 448
+            width: 620
+            height: 72
+            bg_color: 0x222B33
+            widgets:
+              - label:
+                  text: "Синхронизировать сейчас"
+                  align: CENTER
+                  text_font: f_body
+                  text_color: 0xE3E9EE
+            on_click:
+              - lvgl.label.update:
+                  id: lbl_time_now
+                  text: "запрашиваю время…"
+              - lambda: 'id(sntp_time).update();'
 
         - label:
             id: lbl_time_now
             text: "—"
             align: TOP_MID
-            y: 360
+            y: 540
             text_font: f_body
             text_color: 0xE9A45C
 
@@ -481,7 +603,7 @@ lvgl:
         - button:
             align: TOP_LEFT
             x: 20
-            y: 18
+            y: 58
             width: 130
             height: 50
             bg_color: 0x222B33
@@ -494,6 +616,6 @@ lvgl:
             text: "—"
             align: TOP_LEFT
             x: 40
-            y: 92
+            y: 128
             text_font: f_small
             text_color: 0xE3E9EE

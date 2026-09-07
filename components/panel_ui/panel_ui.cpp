@@ -212,6 +212,10 @@ void PanelUI::load_settings() {
       this->s_sleep_after_ms_ = parse_ms(d["sleep_after"] | "60s");
       this->s_wake_on_motion_ = d["wake_on_motion"] | true;
       this->s_theme_ = std::string(d["theme"] | "dark");
+      this->s_day_start_ = d["day_start"] | 7;
+      this->s_night_start_ = d["night_start"] | 23;
+      this->s_day_always_on_ = d["day_always_on"] | false;
+      this->s_night_off_ = d["night_off"] | true;
     }
     JsonObject t = doc["time"].as<JsonObject>();
     if (!t.isNull()) {

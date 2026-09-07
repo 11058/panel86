@@ -60,7 +60,23 @@ lvgl:
                         align: CENTER
                         text_font: montserrat_20
                   on_click:
+                    - script.execute: reset_scroll
                     - lvgl.page.show: page_settings
+        # Ловец пробуждающего касания. Объявлен здесь, но при загрузке
+        # переносится на верхний слой LVGL, чтобы работать на всех страницах.
+        - obj:
+            id: wake_catcher
+            x: 0
+            y: 0
+            width: 720
+            height: 720
+            hidden: true
+            on_click:
+              # Ничего не делаем намеренно: смысл в том, чтобы касание
+              # НЕ дошло до элемента под ловцом. Само касание уже сбросило
+              # счётчик простоя LVGL, и подсветка вернётся сама.
+              - logger.log: "пробуждающее касание перехвачено"
+
         - obj:
             id: ui_root
             x: 0

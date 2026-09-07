@@ -24,7 +24,7 @@ image:
 time:
   - platform: sntp
     id: sntp_time
-    timezone: Asia/Yekaterinburg
+    timezone: UTC-5   # это GMT+5: в POSIX знак инвертирован
     servers:
       - pool.ntp.org
       - time.cloudflare.com
@@ -136,20 +136,93 @@ interval:
           lv_label_set_text(id(lbl_time_src),
                             id(panel_storage)->time_source() == "sntp" ? "интернет" : "Home Assistant");
 
-  # Засыпание экрана: гасим подсветку после простоя, будим касанием.
-  # Простой считает сам LVGL, отдельного трекинга не нужно.
+  # Засыпание экрана с расписанием.
+  #
+  # Днём панель может гореть постоянно — на кухне или в прихожей это
+  # удобнее, чем каждый раз будить её касанием. Ночью, наоборот, экран
+  # гасится полностью: подсветка в спальне ночью недопустима даже слабая.
+  #
+  # Первое касание после погасания только будит и НИЧЕГО не нажимает:
+  # иначе спросонья случайно выключаешь свет, которого не собирался трогать.
   - interval: 1s
     then:
       - lambda: |-
-          const uint32_t after = id(panel_storage)->sleep_after_ms();
-          if (after == 0) return;                       // «никогда»
-          static bool dimmed = false;
-          const uint32_t idle = lv_display_get_inactive_time(nullptr);
-          const bool should = idle > after;
-          if (should == dimmed) return;
-          dimmed = should;
+          auto *ps = id(panel_storage);
+          const uint32_t after = ps->sleep_after_ms();
+
+          // Какой сейчас период. Без синхронизированного времени считаем днём:
+          // лучше зря светить, чем оставить человека перед чёрным стеклом.
+          bool night = false;
+          auto t = id(sntp_time).now();
+          if (t.is_valid()) {
+            const int h = t.hour, d = ps->day_start_hour(), n = ps->night_start_hour();
+            night = (d <= n) ? (h < d || h >= n)      // обычный день внутри суток
+                             : (h < d && h >= n);     // «день» переходит через полночь
+          }
+
+          int target;
+          if (!night && ps->day_always_on()) {
+            target = ps->brightness();                       // днём горит всегда
+          } else if (after == 0) {
+            target = ps->brightness();                       // засыпание отключено
+          } else if (lv_display_get_inactive_time(nullptr) > after) {
+            target = (night && ps->night_off()) ? 0 : ps->sleep_brightness();
+          } else {
+            target = ps->brightness();
+          }
+
+          static int applied = -1;
+          if (target == applied) return;
+          const bool waking = (applied >= 0 && target > applied);
+          applied = target;
+
           auto call = id(backlight).turn_on();
-          call.set_brightness((should ? id(panel_storage)->sleep_brightness()
-                                      : id(panel_storage)->brightness()) / 100.0f);
-          call.set_transition_length(should ? 1200 : 200);
+          call.set_brightness(target / 100.0f);
+          call.set_transition_length(waking ? 200 : 1200);
           call.perform();
+
+          // Ловец касания: пока экран приглушён или погашен, поверх всего
+          // висит прозрачный слой. Он съедает первое касание, будит панель
+          // и уходит — нажатие не доходит до карточки под ним.
+          lv_obj_t *c = id(wake_catcher);
+          if (target < ps->brightness()) {
+            lv_obj_remove_flag(c, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_foreground(c);
+          } else {
+            lv_obj_add_flag(c, LV_OBJ_FLAG_HIDDEN);
+          }
+
+  # Досинхронизация времени.
+  #
+  # ESPHome поднимает SNTP в setup(), то есть ДО появления сети: первая
+  # попытка уходит в пустоту, а следующая — только через интервал
+  # синхронизации, то есть через часы. Поэтому пока время не получено,
+  # перезапускаем SNTP каждые 20 с при живой сети.
+  - interval: 20s
+    then:
+      - lambda: |-
+          if (id(sntp_time).now().is_valid()) return;
+          if (!wifi::global_wifi_component->is_connected()) return;
+          // Частая причина — не работает разрешение имён: сервер задан
+          // именем, а DNS в сети не выдан или недоступен.
+          auto dns = wifi::global_wifi_component->get_dns_address(0);
+          char dbuf[48] = "нет";
+          dns.str_to(dbuf);
+
+          // Если сервер имён не выдан, имя NTP-сервера разрешать нечем
+          // и время не придёт никогда. Наблюдалось на живой панели:
+          // DNS 0.0.0.0 при исправно полученном адресе. Похоже, виноват
+          // Ethernet — он настроен, кабеля нет, и его бесконечные попытки
+          // DHCP затирают общие настройки.
+          if (strcmp(dbuf, "0.0.0.0") == 0) {
+            ip_addr_t fallback;
+            IP_ADDR4(&fallback, 1, 1, 1, 1);
+            dns_setserver(0, &fallback);
+            IP_ADDR4(&fallback, 8, 8, 8, 8);
+            dns_setserver(1, &fallback);
+            ESP_LOGW("time", "DNS не выдан — ставлю резервный 1.1.1.1");
+          }
+
+          ESP_LOGI("time", "времени нет — перезапускаю SNTP (DNS: %s)", dbuf);
+          id(sntp_time).call_setup();
+          id(sntp_time).update();

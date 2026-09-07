@@ -193,7 +193,9 @@ lvgl:
             max_length: 32
             placeholder_text: "имя сети"
             on_click:
-              - lambda: 'lv_keyboard_set_textarea(id(kb_wifi)->obj, id(ta_wifi_ssid));'
+              - script.execute:
+                  id: kb_show
+                  ta: !lambda 'return reinterpret_cast<int>(id(ta_wifi_ssid));'
         - textarea:
             id: ta_wifi_pwd
             align: TOP_MID
@@ -204,7 +206,9 @@ lvgl:
             max_length: 63
             placeholder_text: "пароль"
             on_click:
-              - lambda: 'lv_keyboard_set_textarea(id(kb_wifi)->obj, id(ta_wifi_pwd));'
+              - script.execute:
+                  id: kb_show
+                  ta: !lambda 'return reinterpret_cast<int>(id(ta_wifi_pwd));'
         - label:
             id: lbl_wifi_result
             text: "коснитесь поля, чтобы вводить"
@@ -223,6 +227,7 @@ lvgl:
                   text: "Назад"
                   align: CENTER
             on_click:
+              - script.execute: kb_hide
               - lvgl.page.show: page_wifi_list
         - button:
             id: btn_wifi_join
@@ -236,6 +241,7 @@ lvgl:
                   text: "Подключить"
                   align: CENTER
             on_click:
+              - script.execute: kb_hide
               - lvgl.label.update:
                   id: lbl_wifi_result
                   text: "Подключение…"
