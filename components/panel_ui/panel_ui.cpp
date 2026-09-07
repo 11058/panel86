@@ -25,6 +25,19 @@ namespace panel_ui {
 
 static const char *const TAG = "panel_ui";
 
+/// "250ms", "2s" -> миллисекунды. Пустое или мусор -> 1000.
+static uint32_t parse_ms(const char *v) {
+  if (v == nullptr || *v == 0)
+    return 1000;
+  char *end = nullptr;
+  const long n = strtol(v, &end, 10);
+  if (end == v || n < 0)
+    return 1000;
+  if (end != nullptr && *end == 's')
+    return static_cast<uint32_t>(n) * 1000;
+  return static_cast<uint32_t>(n);
+}
+
 void PanelUI::setup() {
   esp_vfs_littlefs_conf_t conf = {};
   conf.base_path = this->base_path_;
@@ -144,11 +157,15 @@ bool PanelUI::write_layout(const std::string &data) {
 
 // Цвет акцента по типу карточки. Пока грубо: смысл в том, чтобы типы
 // различались на экране, а не в красоте — тема появится позже.
+// Оттенок по типу. Акцент темы задаёт управляемые элементы, измеряемые
+// остаются нейтральными — так на экране видно, что можно трогать.
+static uint32_t g_accent = 0xC2610C;
+
 static lv_color_t accent_for(const std::string &type) {
-  if (type == "light")   return lv_color_hex(0xC2610C);
-  if (type == "switch")  return lv_color_hex(0x0F666B);
+  if (type == "light" || type == "switch" || type == "scene" || type == "script")
+    return lv_color_hex(g_accent);
   if (type == "climate") return lv_color_hex(0xA83232);
-  if (type == "valve")   return lv_color_hex(0x2E6DA4);
+  if (type == "valve" || type == "cover") return lv_color_hex(0x2E6DA4);
   return lv_color_hex(0x5A6875);
 }
 
@@ -160,44 +177,225 @@ static void card_event_cb(lv_event_t *e) {
 
 void PanelUI::render_card_(void *parent, Card *card, int x, int y, int w, int h) {
   auto *par = static_cast<lv_obj_t *>(parent);
+  const lv_color_t accent = accent_for(card->type);
 
   lv_obj_t *box = lv_obj_create(par);
   lv_obj_set_pos(box, x, y);
   lv_obj_set_size(box, w, h);
-  lv_obj_set_style_radius(box, 16, LV_PART_MAIN);
+  lv_obj_set_style_radius(box, this->theme_radius_, LV_PART_MAIN);
   lv_obj_set_style_border_width(box, 2, LV_PART_MAIN);
-  lv_obj_set_style_border_color(box, accent_for(card->type), LV_PART_MAIN);
-  lv_obj_set_style_pad_all(box, 12, LV_PART_MAIN);
+  lv_obj_set_style_border_color(box, accent, LV_PART_MAIN);
+  lv_obj_set_style_pad_all(box, 14, LV_PART_MAIN);
   lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
 
+  // Название — приглушённое, сверху.
   lv_obj_t *name = lv_label_create(box);
   lv_label_set_text(name, card->label.c_str());
-  lv_obj_align(name, LV_ALIGN_TOP_LEFT, 0, 0);
   lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
-  lv_obj_set_width(name, w - 28);
+  lv_obj_set_width(name, w - 32);
+  lv_obj_align(name, LV_ALIGN_TOP_LEFT, 0, 0);
+  if (this->font_small_ != nullptr)
+    lv_obj_set_style_text_font(name, static_cast<const lv_font_t *>(this->font_small_), LV_PART_MAIN);
 
+  // Главное значение — крупное, цветное.
   lv_obj_t *value = lv_label_create(box);
   lv_label_set_text(value, "—");
-  lv_obj_align(value, LV_ALIGN_BOTTOM_LEFT, 0, 0);
-  lv_obj_set_style_text_color(value, accent_for(card->type), LV_PART_MAIN);
+  lv_obj_align(value, LV_ALIGN_LEFT_MID, 0, 6);
+  lv_obj_set_style_text_color(value, accent, LV_PART_MAIN);
+  if (this->font_title_ != nullptr)
+    lv_obj_set_style_text_font(value, static_cast<const lv_font_t *>(this->font_title_), LV_PART_MAIN);
+
+  // Вторая строка: уставка у климата, единицы у датчика, режим у остальных.
+  lv_obj_t *sub = lv_label_create(box);
+  lv_label_set_text(sub, "");
+  lv_obj_align(sub, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+  if (this->font_small_ != nullptr)
+    lv_obj_set_style_text_font(sub, static_cast<const lv_font_t *>(this->font_small_), LV_PART_MAIN);
 
   card->box = box;
   card->lbl_name = name;
   card->lbl_value = value;
+  card->lbl_sub = sub;
   card->owner = this;
 
-  // Управляемые типы реагируют на касание, датчики — нет.
-  if (card->type == "light" || card->type == "switch" || card->type == "valve") {
+  // Управляемое реагирует на касание, измеряемое — нет.
+  // Пользователь должен видеть разницу до того, как ткнёт.
+  const bool controllable =
+      card->type == "light" || card->type == "switch" || card->type == "valve" ||
+      card->type == "cover" || card->type == "scene" || card->type == "script" || card->type == "lock";
+  if (controllable) {
     lv_obj_add_flag(box, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(box, card_event_cb, LV_EVENT_CLICKED, card);
+    lv_label_set_text(sub, "нажмите, чтобы переключить");
+  } else {
+    lv_obj_clear_flag(box, LV_OBJ_FLAG_CLICKABLE);
+    if (!card->unit.empty())
+      lv_label_set_text(sub, card->unit.c_str());
+  }
+}
+
+// Человеческое представление состояния. HA присылает строки, и «on»
+// на настенной панели читается хуже, чем «Вкл».
+static std::string humanize(const std::string &state) {
+  if (state == "on")          return "Вкл";
+  if (state == "off")         return "Выкл";
+  if (state == "open")        return "Открыто";
+  if (state == "closed")      return "Закрыто";
+  if (state == "unavailable") return "нет связи";
+  if (state == "unknown")     return "—";
+  if (state == "heat")        return "Нагрев";
+  if (state == "cool")        return "Охлаждение";
+  if (state == "idle")        return "Ожидание";
+  if (state == "auto")        return "Авто";
+  return state;
+}
+
+void PanelUI::apply_state_(Card *card, const std::string &state) {
+  auto *value = static_cast<lv_obj_t *>(card->lbl_value);
+  auto *box = static_cast<lv_obj_t *>(card->box);
+  if (value == nullptr)
+    return;
+
+  std::string shown = humanize(state);
+
+  // Числовые типы: округляем до заданной точности и дописываем единицы.
+  bool numeric = false;
+  float num = NAN;
+  {
+    char *end = nullptr;
+    num = strtof(state.c_str(), &end);
+    numeric = (end != state.c_str() && end != nullptr && *end == '\0');
+  }
+  if (numeric) {
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%.*f", card->decimals, num);
+    shown = buf;
+    if (!card->unit.empty()) {
+      shown += " ";
+      shown += card->unit;
+    }
+  }
+
+  lv_label_set_text(value, shown.c_str());
+
+  // Включённое подсвечиваем фоном: состояние должно читаться с двух метров,
+  // а не по мелкой надписи.
+  if (box != nullptr) {
+    const bool active = (state == "on" || state == "open" || state == "heat");
+    lv_obj_set_style_bg_color(box, active ? accent_for(card->type) : lv_color_hex(0x101519), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(box, active ? LV_OPA_20 : LV_OPA_TRANSP, LV_PART_MAIN);
+  }
+
+  // Пороги: выход за границу окрашивает значение тревожным цветом.
+  if (numeric) {
+    bool warn = (!std::isnan(card->warn_above) && num > card->warn_above) ||
+                (!std::isnan(card->warn_below) && num < card->warn_below);
+    lv_obj_set_style_text_color(value, warn ? lv_color_hex(0xA32217) : accent_for(card->type), LV_PART_MAIN);
   }
 }
 
 void PanelUI::update_card_value_(Card *card, const std::string &state) {
   if (card->lbl_value == nullptr)
     return;
+
+  // Подавление дребезга. Измерено на живом HA: датчик напряжения шлёт
+  // обновление раз в 1,6 с, и 88 % изменений меньше 0,5 В — это шум АЦП.
+  // Без подавления карточка перерисовывается вечно, экран не засыпает
+  // и панель греется в закрытом подрозетнике. См. docs/02-ha-survey.md.
+  char *end = nullptr;
+  const float num = strtof(state.c_str(), &end);
+  const bool numeric = (end != state.c_str() && end != nullptr && *end == '\0');
+
+  const uint32_t now = millis();
+  if (numeric && !std::isnan(card->last_num)) {
+    if (card->deadband > 0.0f && std::fabs(num - card->last_num) < card->deadband)
+      return;
+    if (card->throttle_ms > 0 && (now - card->last_draw) < card->throttle_ms)
+      return;
+  }
+  card->last_num = numeric ? num : NAN;
+  card->last_draw = now;
+
   ESP_LOGD(TAG, "карточка '%s' (%s) <- %s", card->label.c_str(), card->entity.c_str(), state.c_str());
-  lv_label_set_text(static_cast<lv_obj_t *>(card->lbl_value), state.c_str());
+  this->apply_state_(card, state);
+}
+
+void PanelUI::demo_fill() {
+  // Правдоподобные значения по типам: позволяет проверить вёрстку
+  // и поведение карточек, когда Home Assistant недоступен.
+  int i = 0;
+  for (auto *card : this->cards_) {
+    std::string fake;
+    if (card->type == "light" || card->type == "switch" || card->type == "valve")
+      fake = (i % 2 == 0) ? "on" : "off";
+    else if (card->type == "climate")
+      fake = "heat";
+    else if (card->type == "cover")
+      fake = (i % 2 == 0) ? "open" : "closed";
+    else
+      fake = (i % 3 == 0) ? "23.4" : (i % 3 == 1 ? "231.7" : "95.5");
+    card->last_num = NAN;
+    card->last_draw = 0;
+    this->apply_state_(card, fake);
+    i++;
+  }
+  ESP_LOGI(TAG, "демо-режим: заполнено карточек %u", (unsigned) this->cards_.size());
+}
+
+void PanelUI::render_page_(void *tile, const void *page_json, int w, int h) {
+  const JsonObject &page = *static_cast<const JsonObject *>(page_json);
+
+  int cols = 2, rows = 4;
+  JsonArray grid = page["grid"].as<JsonArray>();
+  if (!grid.isNull() && grid.size() == 2) {
+    cols = grid[0].as<int>();
+    rows = grid[1].as<int>();
+  }
+  if (cols < 1) cols = 1;
+  if (rows < 1) rows = 1;
+
+  const int gap = 12, pad = 12, header = 46;
+  auto *par = static_cast<lv_obj_t *>(tile);
+
+  // Заголовок страницы: без него при нескольких страницах непонятно, где ты.
+  const char *title = page["title"] | "";
+  if (*title != 0) {
+    lv_obj_t *hdr = lv_label_create(par);
+    lv_label_set_text(hdr, title);
+    lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, 8);
+    if (this->font_title_ != nullptr)
+      lv_obj_set_style_text_font(hdr, static_cast<const lv_font_t *>(this->font_title_), LV_PART_MAIN);
+  }
+
+  const int top = (*title != 0) ? header : pad;
+  const int cw = (w - 2 * pad - (cols - 1) * gap) / cols;
+  const int ch = (h - top - pad - (rows - 1) * gap) / rows;
+
+  int idx = 0;
+  for (JsonObject jc : page["cards"].as<JsonArray>()) {
+    if (idx >= cols * rows) {
+      ESP_LOGW(TAG, "на странице '%s' карточек больше, чем клеток %dx%d — лишние пропущены", title, cols, rows);
+      break;
+    }
+    auto *card = new Card();  // NOLINT
+    card->type = jc["type"] | "";
+    card->entity = jc["entity"] | "";
+    card->label = jc["label"] | "";
+    card->unit = jc["unit"] | "";
+    card->decimals = jc["decimals"] | 1;
+    if (card->label.empty())
+      card->label = card->entity.empty() ? card->type : card->entity;
+    card->deadband = jc["deadband"] | this->def_deadband_;
+    card->throttle_ms = parse_ms(jc["throttle"] | this->def_throttle_.c_str());
+    card->warn_above = jc["warn_above"] | NAN;
+    card->warn_below = jc["warn_below"] | NAN;
+
+    const int cx = pad + (idx % cols) * (cw + gap);
+    const int cy = top + (idx / cols) * (ch + gap);
+    this->render_card_(par, card, cx, cy, cw, ch);
+    this->cards_.push_back(card);
+    idx++;
+  }
 }
 
 bool PanelUI::build_ui(void *root) {
@@ -221,51 +419,65 @@ bool PanelUI::build_ui(void *root) {
   const int rw = lv_obj_get_width(par);
   const int rh = lv_obj_get_height(par);
 
-  int cols = 2, rows = 4;
+  size_t n_pages = 0;
   bool ok = json::parse_json(data, [&](JsonObject doc) -> bool {
+    // Тема
+    JsonObject theme = doc["theme"].as<JsonObject>();
+    if (!theme.isNull()) {
+      const char *acc = theme["accent"] | "";
+      if (acc[0] == '#' && strlen(acc) == 7)
+        g_accent = strtoul(acc + 1, nullptr, 16);
+      this->theme_radius_ = theme["radius"] | 16;
+    }
+    JsonObject defs = doc["defaults"].as<JsonObject>();
+    this->def_deadband_ = defs.isNull() ? 0.0f : (defs["deadband"] | 0.0f);
+    this->def_throttle_ = defs.isNull() ? "1s" : std::string(defs["throttle"] | "1s");
+
     JsonArray pages = doc["pages"].as<JsonArray>();
     if (pages.isNull() || pages.size() == 0) {
       ESP_LOGE(TAG, "в раскладке нет страниц");
       return false;
     }
-    // Первая страница. Многостраничность — следующий шаг.
-    JsonObject page = pages[0].as<JsonObject>();
-    JsonArray grid = page["grid"].as<JsonArray>();
-    if (!grid.isNull() && grid.size() == 2) {
-      cols = grid[0].as<int>();
-      rows = grid[1].as<int>();
-    }
-    const int gap = 12, pad = 12;
-    const int cw = (rw - 2 * pad - (cols - 1) * gap) / cols;
-    const int ch = (rh - 2 * pad - (rows - 1) * gap) / rows;
 
-    int idx = 0;
-    for (JsonObject jc : page["cards"].as<JsonArray>()) {
-      if (idx >= cols * rows) {
-        ESP_LOGW(TAG, "карточек больше, чем клеток %dx%d — лишние пропущены", cols, rows);
+    // Свайп между страницами: горизонтальная прокрутка с привязкой к центру.
+    // Специально НЕ tileview: тот виджет ESPHome собирает, только если он
+    // объявлен в YAML, а это снова связало бы рантайм с пересборкой.
+    // Здесь достаточно обычного lv_obj, который уже есть всегда.
+    lv_obj_t *scroller = lv_obj_create(par);
+    lv_obj_set_size(scroller, rw, rh);
+    lv_obj_set_style_bg_opa(scroller, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(scroller, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(scroller, 0, LV_PART_MAIN);
+    lv_obj_set_scroll_dir(scroller, LV_DIR_HOR);
+    lv_obj_set_scroll_snap_x(scroller, LV_SCROLL_SNAP_CENTER);
+    lv_obj_set_scrollbar_mode(scroller, LV_SCROLLBAR_MODE_OFF);
+
+    for (JsonObject page : pages) {
+      if (page["hidden"] | false)
+        continue;
+      lv_obj_t *tile = lv_obj_create(scroller);
+      lv_obj_set_size(tile, rw, rh);
+      // Абсолютное позиционирование: LV_USE_FLEX в сборке ESPHome выключен.
+      lv_obj_set_pos(tile, (int) n_pages * rw, 0);
+      lv_obj_set_style_bg_opa(tile, LV_OPA_TRANSP, LV_PART_MAIN);
+      lv_obj_set_style_border_width(tile, 0, LV_PART_MAIN);
+      lv_obj_set_style_pad_all(tile, 0, LV_PART_MAIN);
+      lv_obj_clear_flag(tile, LV_OBJ_FLAG_SCROLLABLE);
+      this->render_page_(tile, &page, rw, rh);
+      n_pages++;
+      if (n_pages >= 8) {
+        ESP_LOGW(TAG, "больше 8 страниц не строим");
         break;
       }
-      auto *card = new Card();  // NOLINT
-      card->type = jc["type"] | "";
-      card->entity = jc["entity"] | "";
-      card->label = jc["label"] | "";
-      if (card->label.empty())
-        card->label = card->entity.empty() ? card->type : card->entity;
-
-      const int cx = pad + (idx % cols) * (cw + gap);
-      const int cy = pad + (idx / cols) * (ch + gap);
-      this->render_card_(par, card, cx, cy, cw, ch);
-      this->cards_.push_back(card);
-      idx++;
     }
-    return true;
+    return n_pages > 0;
   });
 
   if (!ok) {
     ESP_LOGE(TAG, "раскладка не разобрана");
     return false;
   }
-  ESP_LOGI(TAG, "построено карточек: %u (сетка %dx%d)", (unsigned) this->cards_.size(), cols, rows);
+  ESP_LOGI(TAG, "построено страниц: %u, карточек: %u", (unsigned) n_pages, (unsigned) this->cards_.size());
   return true;
 }
 

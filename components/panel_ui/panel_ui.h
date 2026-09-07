@@ -2,6 +2,7 @@
 
 #include "esphome/core/component.h"
 
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -28,6 +29,18 @@ class PanelUI : public Component {
   /// перестроение по HTTP не требовало передавать его заново.
   void set_root(void *root) { this->root_ = root; }
 
+  /// Шрифты для карточек. Принимаем lv_font_t* как void*, чтобы заголовок
+  /// не тянул lvgl.h. Из YAML: id(f_title)->get_lv_font() и т.д.
+  void set_fonts(const void *title, const void *value, const void *small) {
+    this->font_title_ = title;
+    this->font_value_ = value;
+    this->font_small_ = small;
+  }
+
+  /// Заполнить карточки правдоподобными значениями без Home Assistant.
+  /// Нужно, чтобы проверять вёрстку и типы карточек, когда HA недоступен.
+  void demo_fill();
+
   bool is_mounted() const { return this->mounted_; }
 
   /// Полный путь к файлу раскладки.
@@ -47,10 +60,22 @@ class PanelUI : public Component {
     std::string type;
     std::string entity;
     std::string label;
+    std::string unit;
+    int decimals{1};
+    float deadband{0.0f};       // не перерисовывать при меньшем изменении
+    uint32_t throttle_ms{1000}; // и не чаще, чем раз в столько
+    float warn_above{NAN};
+    float warn_below{NAN};
+
     void *box{nullptr};        // lv_obj_t *
     void *lbl_name{nullptr};   // lv_obj_t *
     void *lbl_value{nullptr};  // lv_obj_t *
+    void *lbl_sub{nullptr};    // lv_obj_t * — вторая строка: уставка, режим
     PanelUI *owner{nullptr};
+
+    // Состояние подавления дребезга
+    float last_num{NAN};
+    uint32_t last_draw{0};
   };
 
   /// Разобрать раскладку и построить интерфейс внутри контейнера.
@@ -73,8 +98,10 @@ class PanelUI : public Component {
   bool rebuild();
 
  protected:
+  void render_page_(void *tile, const void *page_json, int w, int h);
   void render_card_(void *parent, Card *card, int x, int y, int w, int h);
   void update_card_value_(Card *card, const std::string &state);
+  void apply_state_(Card *card, const std::string &state);
   void start_http_();
 
   std::vector<Card *> cards_;
@@ -82,6 +109,16 @@ class PanelUI : public Component {
   const char *base_path_{"/fs"};
   const char *layout_file_{"layout.json"};
   uint16_t http_port_{8080};
+  // Тема из раскладки
+  uint32_t theme_accent_{0xC2610C};
+  int theme_radius_{16};
+  bool theme_accent_set_{false};
+  float def_deadband_{0.0f};
+  std::string def_throttle_{"1s"};
+
+  const void *font_title_{nullptr};
+  const void *font_value_{nullptr};
+  const void *font_small_{nullptr};
   void *root_{nullptr};   // lv_obj_t *
   void *httpd_{nullptr};  // httpd_handle_t
   bool mounted_{false};
