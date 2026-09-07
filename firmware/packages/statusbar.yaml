@@ -317,3 +317,59 @@ interval:
   - interval: 30s
     then:
       - lambda: 'id(panel_storage)->refresh_templates();'
+
+  # Применение настроек Ethernet.
+  #
+  # Интерфейс поднимается только когда его включили в веб-интерфейсе.
+  # Пока он выключен, DHCP не работает и общие настройки имён не портит —
+  # это и есть настоящее лечение истории с пропадающим DNS.
+  - interval: 3s
+    then:
+      - lambda: |-
+          auto *ps = id(panel_storage);
+          static int applied = -1;                 // -1 ещё не применяли
+          const int want = ps->eth_enabled() ? 1 : 0;
+          if (want == applied) return;
+          applied = want;
+
+          if (!want) {
+            id(eth).disable();
+            ESP_LOGI("net", "Ethernet выключен по настройке");
+            return;
+          }
+
+          id(eth).enable();
+
+          if (!ps->eth_static() || ps->eth_ip().empty()) {
+            ESP_LOGI("net", "Ethernet включён, адрес по DHCP");
+            return;
+          }
+
+          // Статический адрес задаём через esp_netif: set_manual_ip
+          // у компонента ESPHome защищённый, а интерфейс находится
+          // по стандартному ключу ETH_DEF. Применяем с задержкой —
+          // к этому моменту netif уже поднят.
+          id(panel_storage)->set_timeout(1500, []() {
+            auto *ps2 = id(panel_storage);
+            esp_netif_t *nif = esp_netif_get_handle_from_ifkey("ETH_DEF");
+            if (nif == nullptr) {
+              ESP_LOGW("net", "Ethernet: интерфейс не найден, статический адрес не задан");
+              return;
+            }
+            esp_netif_dhcpc_stop(nif);
+            esp_netif_ip_info_t ip = {};
+            ip.ip.addr = esp_ip4addr_aton(ps2->eth_ip().c_str());
+            ip.netmask.addr = esp_ip4addr_aton(ps2->eth_mask().c_str());
+            ip.gw.addr = esp_ip4addr_aton(ps2->eth_gw().c_str());
+            if (esp_netif_set_ip_info(nif, &ip) != ESP_OK) {
+              ESP_LOGW("net", "Ethernet: адрес %s не принят", ps2->eth_ip().c_str());
+              return;
+            }
+            if (!ps2->eth_dns().empty()) {
+              esp_netif_dns_info_t d = {};
+              d.ip.type = ESP_IPADDR_TYPE_V4;
+              d.ip.u_addr.ip4.addr = esp_ip4addr_aton(ps2->eth_dns().c_str());
+              esp_netif_set_dns_info(nif, ESP_NETIF_DNS_MAIN, &d);
+            }
+            ESP_LOGI("net", "Ethernet: статический адрес %s", ps2->eth_ip().c_str());
+          });

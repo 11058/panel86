@@ -22,6 +22,7 @@ esphome:
     - lwip_dns_shim.h
     - editor_html.h
     - icons_mdi.h
+    - eth_netif_shim.h
   friendly_name: ${friendly_name}
   min_version: 2026.7.0
   on_boot:

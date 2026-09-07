@@ -354,6 +354,18 @@ void PanelUI::load_settings() {
       this->s_timezone_ = std::string(t["timezone"] | "UTC-5");
       this->s_sync_every_ = std::string(t["sync_every"] | "6h");
     }
+    JsonObject nw = doc["network"].as<JsonObject>();
+    if (!nw.isNull()) {
+      JsonObject e = nw["ethernet"].as<JsonObject>();
+      if (!e.isNull()) {
+        this->s_eth_enabled_ = e["enabled"] | false;
+        this->s_eth_static_ = std::string(e["mode"] | "dhcp") == "static";
+        this->s_eth_ip_ = std::string(e["ip"] | "");
+        this->s_eth_mask_ = std::string(e["mask"] | "255.255.255.0");
+        this->s_eth_gw_ = std::string(e["gateway"] | "");
+        this->s_eth_dns_ = std::string(e["dns"] | "");
+      }
+    }
     return true;
   });
   ESP_LOGI(TAG, "Настройки: яркость %d%%, засыпание %u мс, тема %s, время из %s",
@@ -2339,7 +2351,7 @@ static esp_err_t handle_post_settings(httpd_req_t *req) {
   // Проверяем до записи: испорченный JSON не должен затирать рабочие
   // настройки и оставить панель, например, с нулевой яркостью.
   bool valid = json::parse_json(body, [](JsonObject doc) -> bool {
-    return !doc["display"].isNull() || !doc["time"].isNull();
+    return !doc["display"].isNull() || !doc["time"].isNull() || !doc["network"].isNull();
   });
   if (!valid) {
     httpd_resp_set_status(req, "422 Unprocessable Entity");

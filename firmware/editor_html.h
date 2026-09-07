@@ -175,6 +175,28 @@ static const char EDITOR_HTML[] = R"PANELEDITOR(
     <p class="note">Датчик присутствия пока не подключён — настройка сохранится
       и заработает, когда он появится.</p>
 
+    <h3>Ethernet</h3>
+    <div class="fld"><span>Использовать Ethernet</span><input id="sEth" type="checkbox"></div>
+    <p class="note">По умолчанию выключен намеренно. Объявленный, но
+      не подключённый интерфейс повторяет DHCP каждые 15 секунд и затирает
+      общие настройки сервера имён — из-за этого не синхронизировалось
+      время и не открывался Home Assistant. Включайте, когда кабель воткнут.</p>
+    <div class="fld"><span>Адрес</span>
+      <select id="sEthMode">
+        <option value="dhcp">получать автоматически</option>
+        <option value="static">задать вручную</option>
+      </select></div>
+    <div id="ethStatic">
+      <div class="fld"><span>IP-адрес</span>
+        <input id="sEthIp" class="mono" style="width:190px" placeholder="192.168.1.50"></div>
+      <div class="fld"><span>Маска</span>
+        <input id="sEthMask" class="mono" style="width:190px" placeholder="255.255.255.0"></div>
+      <div class="fld"><span>Шлюз</span>
+        <input id="sEthGw" class="mono" style="width:190px" placeholder="192.168.1.1"></div>
+      <div class="fld"><span>Сервер имён</span>
+        <input id="sEthDns" class="mono" style="width:190px" placeholder="192.168.1.1"></div>
+    </div>
+
     <h3>Время</h3>
     <div class="fld"><span>Источник</span>
       <select id="sTimeSrc"><option value="sntp">интернет (NTP)</option>
@@ -1037,7 +1059,8 @@ const DEF_SETTINGS = {
   display:{brightness:80, sleep_after:"60s", sleep_brightness:10, theme:"dark", font_scale:"normal",
            day_start:7, night_start:23, day_always_on:false, night_off:true,
            wake_on_motion:true},
-  time:{source:"sntp", server:"pool.ntp.org", timezone:"UTC-5", sync_every:"6h"}
+  time:{source:"sntp", server:"pool.ntp.org", timezone:"UTC-5", sync_every:"6h"},
+  network:{ethernet:{enabled:false, mode:"dhcp", ip:"", mask:"255.255.255.0", gateway:"", dns:""}}
 };
 
 function settingsToForm(){
@@ -1058,6 +1081,14 @@ function settingsToForm(){
   $("sNtp").value = t.server ?? "pool.ntp.org";
   $("sTz").value = t.timezone ?? "UTC-5";
   $("sSync").value = t.sync_every ?? "6h";
+  const e = (settings.network || {}).ethernet || {};
+  $("sEth").checked = !!e.enabled;
+  $("sEthMode").value = e.mode || "dhcp";
+  $("sEthIp").value = e.ip || "";
+  $("sEthMask").value = e.mask || "255.255.255.0";
+  $("sEthGw").value = e.gateway || "";
+  $("sEthDns").value = e.dns || "";
+  $("ethStatic").style.display = $("sEthMode").value === "static" ? "block" : "none";
 }
 
 function formToSettings(){
@@ -1079,10 +1110,23 @@ function formToSettings(){
       server:      $("sNtp").value,
       timezone:    $("sTz").value,
       sync_every:  $("sSync").value
+    },
+    network:{
+      ethernet:{
+        enabled:  $("sEth").checked,
+        mode:     $("sEthMode").value,
+        ip:       $("sEthIp").value.trim(),
+        mask:     $("sEthMask").value.trim(),
+        gateway:  $("sEthGw").value.trim(),
+        dns:      $("sEthDns").value.trim()
+      }
     }
   };
 }
 
+$("sEthMode").addEventListener("change", e => {
+  $("ethStatic").style.display = e.target.value === "static" ? "block" : "none";
+});
 $("sBright").addEventListener("input", e => $("vBright").textContent = e.target.value + " %");
 $("sDim").addEventListener("input",    e => $("vDim").textContent    = e.target.value + " %");
 

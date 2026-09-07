@@ -91,6 +91,14 @@ class PanelUI : public Component {
   const std::string &timezone() const { return this->s_timezone_; }
   const std::string &sync_every() const { return this->s_sync_every_; }
 
+  // Ethernet
+  bool eth_enabled() const { return this->s_eth_enabled_; }
+  bool eth_static() const { return this->s_eth_static_; }
+  const std::string &eth_ip() const { return this->s_eth_ip_; }
+  const std::string &eth_mask() const { return this->s_eth_mask_; }
+  const std::string &eth_gw() const { return this->s_eth_gw_; }
+  const std::string &eth_dns() const { return this->s_eth_dns_; }
+
   /// Изменить одну настройку и сразу сохранить. Значение — как в JSON.
   bool set_setting(const std::string &group, const std::string &key, const std::string &value);
 
@@ -313,6 +321,12 @@ class PanelUI : public Component {
   std::string s_ntp_server_{"pool.ntp.org"};
   std::string s_timezone_{"UTC-5"};
   std::string s_sync_every_{"6h"};
+  bool s_eth_enabled_{false};
+  bool s_eth_static_{false};
+  std::string s_eth_ip_;
+  std::string s_eth_mask_{"255.255.255.0"};
+  std::string s_eth_gw_;
+  std::string s_eth_dns_;
 };
 
 }  // namespace panel_ui
