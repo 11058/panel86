@@ -375,6 +375,14 @@
           как в Bubble Card.</p>
       </div>
 
+      <div id="rowFields">
+        <label>Кнопки в полосе</label>
+        <div id="rowList"></div>
+        <button id="rowAdd" style="margin-top:8px">+ кнопка</button>
+        <p class="hint">Несколько сцен или сценариев в один ряд. По отдельной
+          карточке на каждую сцену уходит вся страница, а нажимают их редко.</p>
+      </div>
+
       <div id="numFields">
         <label>Единицы</label>
         <input id="cUnit" style="width:100%" placeholder="°C">
@@ -406,7 +414,8 @@
 
 // Каталог намеренно закрытый — тот же, что в схеме и в прошивке.
 const TYPES = ["light","switch","climate","cover","valve","fan","scene","script",
-               "sensor","binary_sensor","media","camera","lock"];
+               "sensor","binary_sensor","media","camera","lock",
+               "separator","buttons"];
 const NUMERIC = new Set(["sensor","binary_sensor","climate"]);
 const CONTROLLABLE = new Set(["light","switch","valve","cover","fan","scene","script","lock","media"]);
 
@@ -511,6 +520,31 @@ function render(){
     el.style.borderRadius = radius+"px";
     const i = p.ci;
     {
+      if (card.type === "separator"){
+        el.className = "card" + (i === cardIx ? " sel" : "");
+        el.style.background = "transparent";
+        el.innerHTML = `<div class="n" style="left:6px;top:6px">` +
+                       esc(card.label || "раздел") + `</div>` +
+                       `<div style="position:absolute;left:6px;right:6px;bottom:6px;` +
+                       `height:2px;background:#6b7b88;opacity:.4"></div>`;
+        el.onclick = () => { cardIx = i; render(); };
+        scr.append(el); continue;
+      }
+      if (card.type === "buttons"){
+        el.className = "card" + (i === cardIx ? " sel" : "");
+        el.style.background = "transparent";
+        const bs = card.buttons || [];
+        const hPx2 = (p.h*ch + (p.h-1)*gap) * S, wPx2 = (p.w*cw + (p.w-1)*gap) * S;
+        const bw = bs.length ? (wPx2 - 6*(bs.length-1)) / bs.length : wPx2;
+        el.innerHTML = bs.map((b,k) =>
+          `<div style="position:absolute;left:${k*(bw+6)}px;top:0;width:${bw}px;height:${hPx2}px;` +
+          `border-radius:${Math.min(hPx2/2,18)}px;background:#c2610c33;color:#e3e9ee;` +
+          `display:flex;align-items:center;justify-content:center;font-size:11px;` +
+          `overflow:hidden">${esc(b.label||"кнопка")}</div>`).join("") ||
+          '<div class="n" style="left:6px;top:6px">полоса кнопок пуста</div>';
+        el.onclick = () => { cardIx = i; render(); };
+        scr.append(el); continue;
+      }
       el.className = "card" + (i === cardIx ? " sel" : "");
       const acc = accentFor(card.type);
       const val = demoValue(card.type, i);
@@ -587,6 +621,8 @@ function render(){
     $("cFill").checked = c.fill !== false;
     $("numFields").style.display = NUMERIC.has(c.type) ? "block" : "none";
     $("lightFields").style.display = c.type === "light" ? "block" : "none";
+    $("rowFields").style.display = c.type === "buttons" ? "block" : "none";
+    if (c.type === "buttons") renderRowButtons(c);
   }
 
   $("json").value = JSON.stringify(doc, null, 2);
@@ -632,6 +668,31 @@ bind("cShowIcon",  e => { cur().show_icon  = e.target.checked; render(); }, "cha
 bind("cShowName",  e => { cur().show_name  = e.target.checked; render(); }, "change");
 bind("cShowState", e => { cur().show_state = e.target.checked; render(); }, "change");
 bind("cFill",      e => { cur().fill = e.target.checked; render(); }, "change");
+
+function renderRowButtons(c){
+  c.buttons ||= [];
+  const box = $("rowList");
+  box.innerHTML = "";
+  c.buttons.forEach((b, i) => {
+    const row = document.createElement("div");
+    row.className = "row";
+    row.style.marginTop = "6px";
+    row.innerHTML =
+      `<input value="${esc(b.label||"")}" placeholder="подпись" style="flex:1">` +
+      `<button class="pick" title="выбрать сущность">…</button>` +
+      `<button class="danger">×</button>`;
+    const [inp, pick, del] = row.children;
+    inp.oninput = e => { b.label = e.target.value; render(); };
+    pick.onclick = () => openPicker(e => { b.entity = e.id; if(!b.label) b.label = e.name; render(); });
+    del.onclick  = () => { c.buttons.splice(i,1); render(); };
+    const id = document.createElement("div");
+    id.className = "hint";
+    id.style.margin = "2px 0 0";
+    id.textContent = b.entity || "сущность не выбрана";
+    box.append(row, id);
+  });
+}
+$("rowAdd").onclick = () => { const c = cur(); (c.buttons ||= []).push({label:"",entity:""}); render(); };
 
 $("delCard").onclick = () => { doc.pages[pageIx].cards.splice(cardIx,1); cardIx=-1; render(); };
 $("addPage").onclick = () => {

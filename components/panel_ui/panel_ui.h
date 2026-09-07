@@ -100,6 +100,12 @@ class PanelUI : public Component {
   bool fs_usage(size_t *used, size_t *total);
 
   /// Одна карточка на экране: что показывает и чем нарисована.
+  /// Одна кнопка в полосе кнопок.
+  struct RowButton {
+    std::string label;
+    std::string entity;
+  };
+
   struct Card {
     std::string type;
     std::string entity;
@@ -121,8 +127,20 @@ class PanelUI : public Component {
     void *icon{nullptr};       // lv_obj_t * — символ в круге
     void *icon_box{nullptr};   // lv_obj_t * — сам круг
     void *fill{nullptr};       // lv_obj_t * — заливка по яркости
-    int   level{-1};           // 0..100, -1 если неизвестно
+    int   level{-1};           // яркость 0..100, -1 если неизвестно
     bool  active{false};
+
+    // Живые значения атрибутов. Нужны, чтобы подробности открывались
+    // на текущих значениях, а не на выдуманных: иначе ползунок уставки
+    // показывает 22, человек его трогает — и климат уезжает с 18 на 22.
+    float target_temp{NAN};
+    float current_temp{NAN};
+    int   position{-1};        // штора, 0..100
+    int   volume{-1};          // медиа, 0..100
+    int   fan_pct{-1};
+    int   color_temp{-1};      // кельвины
+    int32_t rgb{-1};           // цвет лампы, 0xRRGGBB
+    std::vector<RowButton> buttons;
     PanelUI *owner{nullptr};
 
     // Состояние подавления дребезга
@@ -153,6 +171,10 @@ class PanelUI : public Component {
   void call_service(const std::string &service, const char *key = nullptr,
                     const std::string &value = "");
 
+  /// Вызвать действие для конкретной сущности — для полосы кнопок,
+  /// где у каждой кнопки своя.
+  void call_service_for(const std::string &entity, const std::string &service);
+
   size_t card_count() const { return this->cards_.size(); }
 
   /// Перестроить интерфейс из того, что сейчас лежит в файле.
@@ -168,6 +190,13 @@ class PanelUI : public Component {
   void render_card_(void *parent, Card *card, int x, int y, int w, int h);
   void update_card_value_(Card *card, const std::string &state);
   void update_card_level_(Card *card, int level);
+
+ public:
+  /// Перекрасить карточку под текущий цвет лампы. Публично, потому что
+  /// вызывается из обработчика подписки.
+  void refresh_card_colors(Card *card);
+
+ protected:
   void apply_state_(Card *card, const std::string &state);
   void start_http_();
   void build_details_controls(void *sheet, Card *card, int width);

@@ -50,7 +50,8 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 48,
-          "default": 16
+          "default": 16,
+          "description": "Скругление карточек. У «пузырей» ограничено половиной высоты."
         }
       }
     },
@@ -188,13 +189,17 @@
             "climate",
             "cover",
             "valve",
+            "fan",
             "scene",
             "script",
             "sensor",
+            "binary_sensor",
             "media",
             "camera",
             "lock",
             "relay",
+            "separator",
+            "buttons",
             "room_grid",
             "spacer"
           ],
@@ -211,7 +216,8 @@
           "description": "Если не задан — берётся friendly_name из HA."
         },
         "icon": {
-          "type": "string"
+          "type": "string",
+          "description": "Имя иконки Material Design Icons — то же, что в Home Assistant после «mdi:». Если не задано, подбирается по типу карточки."
         },
         "span": {
           "type": "array",
@@ -226,6 +232,30 @@
             1,
             1
           ]
+        },
+        "show_icon": {
+          "type": "boolean",
+          "default": true
+        },
+        "show_name": {
+          "type": "boolean",
+          "default": true
+        },
+        "show_state": {
+          "type": "boolean",
+          "default": true
+        },
+        "fill": {
+          "type": "boolean",
+          "default": true,
+          "description": "У света: полоса на карточке показывает яркость."
+        },
+        "tap": {
+          "enum": [
+            "toggle",
+            "none"
+          ],
+          "default": "toggle"
         }
       },
       "allOf": [
@@ -340,6 +370,42 @@
                 },
                 "maxItems": 12,
                 "description": "Список area_id. Плитка комнат с переходом внутрь."
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "buttons"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "buttons"
+            ],
+            "properties": {
+              "buttons": {
+                "type": "array",
+                "maxItems": 5,
+                "description": "Несколько сцен или сценариев в один ряд. По отдельной карточке на каждую сцену уходит вся страница, а нажимают их редко.",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "entity"
+                  ],
+                  "properties": {
+                    "entity": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 16
+                    }
+                  }
+                }
               }
             }
           }
