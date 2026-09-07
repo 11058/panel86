@@ -16,7 +16,35 @@
 # Логотип Home Assistant как маска: один файл, цвет задаётся перекраской
 # в зависимости от состояния связи.
 image:
-  - file: images/ha_logo.png
+  # --- Кадры с камер ---
+  #
+  # Пул из двух картинок: больше двух камер одновременно на экране 720x720
+  # всё равно не разглядеть, а каждая занимает буфер под распакованный кадр.
+  # Адрес подставляется на лету — /api/camera_proxy/<сущность> у Home
+  # Assistant, — а токен берётся из того, что панель сохранила у себя.
+  #
+  # Декодирование JPEG программное, через JPEGDEC. Аппаратный блок P4
+  # заманчивее, но ESPHome его не использует, а свой декодер ради этого
+  # писать пока не стоит.
+  - platform: online_image
+    id: cam_img_0
+    url: "http://127.0.0.1/none.jpg"
+    type: RGB565
+    format: JPEG
+    resize: 340x200
+    buffer_size: 32768
+    update_interval: never
+  - platform: online_image
+    id: cam_img_1
+    url: "http://127.0.0.1/none.jpg"
+    type: RGB565
+    format: JPEG
+    resize: 340x200
+    buffer_size: 32768
+    update_interval: never
+
+  - platform: file
+    file: images/ha_logo.png
     id: img_ha_logo
     type: GRAYSCALE
     resize: 26x26
@@ -260,3 +288,23 @@ interval:
           auto call = id(backlight).turn_on();
           call.set_brightness(id(panel_storage)->brightness() / 100.0f);
           call.perform();
+
+  # Обновление кадров с камер.
+  #
+  # Раз в полминуты, а не потоком: панель показывает снимок, а не видео.
+  #
+  # ВНИМАНИЕ. Замерено на живой панели: кадр 960x1280 весом 192 КБ грузится
+  # и раскодируется около 5 секунд, и всё это время главный цикл занят —
+  # панель не реагирует на касания. Отсюда редкий интервал.
+  #
+  # Чем это лечится по-настоящему:
+  #   - отдавать с Home Assistant кадр поменьше (у камеры обычно есть
+  #     второй поток низкого разрешения — его и надо показывать);
+  #   - декодировать аппаратным блоком JPEG у P4. ESPHome его не использует,
+  #     а свой декодер — отдельная работа.
+  - interval: 30s
+    then:
+      - lambda: |-
+          if (!api::global_api_server->is_connected() &&
+              !wifi::global_wifi_component->is_connected()) return;
+          id(panel_storage)->refresh_cameras();

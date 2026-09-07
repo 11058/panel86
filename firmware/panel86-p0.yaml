@@ -48,6 +48,8 @@ esphome:
             then:
               - script.execute: theme_light
         - lambda: |-
+            id(panel_storage)->add_camera_slot(id(cam_img_0));
+            id(panel_storage)->add_camera_slot(id(cam_img_1));
             id(panel_storage)->set_root(id(ui_root));
             const std::string fs = id(panel_storage)->font_scale();
             id(panel_storage)->set_fonts(

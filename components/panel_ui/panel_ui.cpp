@@ -14,6 +14,10 @@
 #include "editor_html.h"
 #include "icons_mdi.h"
 
+#ifdef USE_IMAGE
+#include "esphome/components/online_image/online_image.h"
+#endif
+
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
 
@@ -477,6 +481,61 @@ void PanelUI::render_card_(void *parent, Card *card, int x, int y, int w, int h)
     return;
   }
 
+  // Камера: кадр во всю карточку. Смысл камеры — увидеть, а не прочитать
+  // подпись, поэтому изображение занимает всё, а название лежит поверх.
+#ifdef USE_IMAGE
+  if (card->type == "camera" && this->cam_used_ < this->cam_slots_.size()) {
+    auto *slot = static_cast<online_image::OnlineImage *>(this->cam_slots_[this->cam_used_++]);
+
+    lv_obj_t *box = lv_obj_create(par);
+    lv_obj_set_pos(box, x, y);
+    lv_obj_set_size(box, w, h);
+    const int r2 = std::min(h, w) / 2 > 28 ? 28 : std::min(h, w) / 2;
+    lv_obj_set_style_radius(box, r2, LV_PART_MAIN);
+    lv_obj_set_style_border_width(box, 0, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(box, lv_color_hex(card_bg()), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(box, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(box, 0, LV_PART_MAIN);
+    lv_obj_set_style_clip_corner(box, true, LV_PART_MAIN);
+    lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *img = lv_image_create(box);
+    lv_image_set_src(img, slot->get_lv_image_dsc());
+    lv_obj_center(img);
+
+    lv_obj_t *cap = lv_label_create(box);
+    lv_label_set_text(cap, card->label.c_str());
+    lv_label_set_long_mode(cap, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(cap, w - 24);
+    lv_obj_align(cap, LV_ALIGN_BOTTOM_LEFT, 12, -10);
+    lv_obj_set_style_text_color(cap, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(cap, lv_color_hex(0x000000), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(cap, LV_OPA_50, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(cap, 6, LV_PART_MAIN);
+    lv_obj_set_style_radius(cap, 10, LV_PART_MAIN);
+    if (this->font_small_ != nullptr)
+      lv_obj_set_style_text_font(cap, static_cast<const lv_font_t *>(this->font_small_), LV_PART_MAIN);
+
+    // Адрес снимка и токен — из того, что панель сохранила у себя.
+    const std::string base = this->ha_url();
+    const std::string tok = this->ha_token();
+    if (!base.empty() && !tok.empty()) {
+      const std::string url = base + "/api/camera_proxy/" + card->entity;
+      slot->add_request_header("Authorization", "Bearer " + tok);
+      slot->set_url(url);
+      slot->update();
+      ESP_LOGI(TAG, "камера '%s': запрашиваю кадр %s", card->label.c_str(), url.c_str());
+    } else {
+      lv_label_set_text(cap, (card->label + " · нет подключения к HA").c_str());
+    }
+
+    card->box = box;
+    card->owner = this;
+    card->cam_slot = slot;
+    return;
+  }
+#endif
+
   // Полоса кнопок: несколько сцен или сценариев в один ряд. По отдельной
   // карточке на каждую сцену уходит вся страница, а нажимают их редко.
   if (card->type == "buttons") {
@@ -628,6 +687,17 @@ static lv_color_t card_color(const PanelUI::Card *card) {
   if (card->rgb >= 0 && card->active)
     return lv_color_hex(static_cast<uint32_t>(card->rgb));
   return accent_for(card->type);
+}
+
+void PanelUI::refresh_cameras() {
+#ifdef USE_IMAGE
+  for (auto *c : this->cards_) {
+    if (c->cam_slot == nullptr)
+      continue;
+    ESP_LOGD(TAG, "обновляю кадр камеры '%s'", c->label.c_str());
+    static_cast<online_image::OnlineImage *>(c->cam_slot)->update();
+  }
+#endif
 }
 
 void PanelUI::refresh_card_colors(Card *card) {
@@ -968,6 +1038,7 @@ bool PanelUI::build_ui(void *root) {
   for (auto *c : this->cards_)
     delete c;
   this->cards_.clear();
+  this->cam_used_ = 0;
   this->dots_.clear();
   this->scroller_ = nullptr;
 

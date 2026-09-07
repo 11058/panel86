@@ -31,6 +31,13 @@ class PanelUI : public Component {
 
   /// Шрифты для карточек. Принимаем lv_font_t* как void*, чтобы заголовок
   /// не тянул lvgl.h. Из YAML: id(f_title)->get_lv_font() и т.д.
+  /// Пул картинок под камеры. Передаётся из YAML: свои экземпляры
+  /// online_image компонент создать не может, они объявляются заранее.
+  /// Запросить свежие кадры со всех показанных камер.
+  void refresh_cameras();
+
+  void add_camera_slot(void *online_image) { this->cam_slots_.push_back(online_image); }
+
   void set_fonts(const void *title, const void *value, const void *small, const void *icon = nullptr) {
     this->font_title_ = title;
     this->font_value_ = value;
@@ -141,6 +148,7 @@ class PanelUI : public Component {
     int   color_temp{-1};      // кельвины
     int32_t rgb{-1};           // цвет лампы, 0xRRGGBB
     std::vector<RowButton> buttons;
+    void *cam_slot{nullptr};   // online_image::OnlineImage *
     PanelUI *owner{nullptr};
 
     // Состояние подавления дребезга
@@ -202,6 +210,8 @@ class PanelUI : public Component {
   void build_details_controls(void *sheet, Card *card, int width);
 
   std::vector<Card *> cards_;
+  std::vector<void *> cam_slots_;   // esphome::online_image::OnlineImage *
+  size_t cam_used_{0};
   std::vector<void *> dots_;   // lv_obj_t * — индикатор страниц
   void *scroller_{nullptr};    // lv_obj_t *
   void *sheet_{nullptr};       // lv_obj_t * — панель подробностей
