@@ -93,10 +93,13 @@ panel_ui:
 packages:
   board: !include packages/board.yaml
   eth:   !include packages/net-ethernet.yaml
-  wifi:  !include packages/net-wifi.yaml
+  # Без зашитых учётных данных: сеть берётся только из NVS,
+  # то есть из того, что ввели на экране панели.
+  wifi:  !include packages/net-wifi-provision.yaml
   wifiui: !include packages/wifi-setup-ui.yaml
   spike: !include packages/spike-runtime-binding.yaml
   layout: !include packages/layout-page.yaml
+  statusbar: !include packages/statusbar.yaml
 
 # Оба канала одновременно. Первый в списке — приоритетный: именно он
 # держит маршрут по умолчанию, второй остаётся горячим резервом.

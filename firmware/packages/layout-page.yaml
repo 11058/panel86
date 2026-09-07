@@ -10,11 +10,63 @@ lvgl:
     - id: page_layout
       widgets:
         - obj:
-            id: ui_root
+            id: statusbar
             x: 0
             y: 0
             width: 720
-            height: 720
+            height: 44
+            radius: 0
+            border_width: 0
+            pad_all: 0
+            bg_color: 0x141A20
+            scrollable: false
+            widgets:
+              - label:
+                  id: sb_clock
+                  text: "--:--"
+                  align: LEFT_MID
+                  x: 16
+                  text_font: f_body
+                  text_color: 0xE3E9EE
+              - label:
+                  id: sb_date
+                  text: ""
+                  align: LEFT_MID
+                  x: 92
+                  text_font: f_small
+                  text_color: 0x6B7B88
+              - label:
+                  id: sb_wifi
+                  text: "\U0000F1EB"
+                  align: RIGHT_MID
+                  x: -150
+                  text_font: montserrat_20
+                  text_color: 0x6B7B88
+              - image:
+                  id: sb_ha
+                  src: img_ha_logo
+                  align: RIGHT_MID
+                  x: -98
+              - button:
+                  id: sb_settings
+                  align: RIGHT_MID
+                  x: -8
+                  width: 64
+                  height: 36
+                  bg_color: 0x222B33
+                  widgets:
+                    - label:
+                        text: "\U0000F013"
+                        align: CENTER
+                        text_font: montserrat_20
+                  on_click:
+                    - lvgl.page.show: page_wifi_list
+        - obj:
+            id: ui_root
+            x: 0
+            y: 44
+            width: 720
+            height: 676
             scrollable: false
             pad_all: 0
             border_width: 0

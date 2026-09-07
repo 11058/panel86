@@ -1,0 +1,74 @@
+# ---------------------------------------------------------------------------
+# Статусная строка поверх раскладки.
+#
+# Зачем: человек у стены должен видеть время и понимать, жива ли связь,
+# ещё до того как что-то нажмёт. А шестерёнка — единственный вход
+# в настройку Wi-Fi с самой панели, без телефона и ноутбука.
+#
+# Символы (шестерёнка, значок Wi-Fi) живут в приватной области Unicode
+# и есть только во встроенном montserrat — в наших кириллических шрифтах
+# их нет, будут квадратики. Поэтому символьным меткам явно задан montserrat.
+# ---------------------------------------------------------------------------
+
+# Время: сначала пробуем интернет, HA — как второй источник.
+# Панель не должна показывать прочерки вместо часов только потому,
+# что сервер недоступен.
+# Логотип Home Assistant как маска: один файл, цвет задаётся перекраской
+# в зависимости от состояния связи.
+image:
+  - file: images/ha_logo.png
+    id: img_ha_logo
+    type: GRAYSCALE
+    resize: 26x26
+
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: Asia/Yekaterinburg
+    servers:
+      - pool.ntp.org
+      - time.cloudflare.com
+
+interval:
+  - interval: 1s
+    then:
+      - lambda: |-
+          // Часы
+          auto t = id(sntp_time).now();
+          if (t.is_valid()) {
+            char hm[8], dm[24];
+            snprintf(hm, sizeof(hm), "%02d:%02d", t.hour, t.minute);
+            static const char *const MON[] = {"янв","фев","мар","апр","мая","июн",
+                                              "июл","авг","сен","окт","ноя","дек"};
+            snprintf(dm, sizeof(dm), "%d %s", t.day_of_month, MON[(t.month - 1) % 12]);
+            lv_label_set_text(id(sb_clock), hm);
+            lv_label_set_text(id(sb_date), dm);
+          }
+
+          // Три состояния вместо двух. Промежуточное — оранжевое — там,
+          // где связь формально есть, но пользоваться панелью ещё нельзя.
+          // Это честнее бинарного «подключено», которое вводит в заблуждение.
+          const uint32_t GREEN = 0x3FB950, ORANGE = 0xD9A441, RED = 0xC24038;
+
+          // Wi-Fi: красный — сети нет; оранжевый — есть, но сигнал слабый
+          // и связь будет рваться; зелёный — всё хорошо.
+          uint32_t wc = RED;
+          if (wifi::global_wifi_component->is_connected()) {
+            const int8_t rssi = wifi::global_wifi_component->wifi_rssi();
+            wc = (rssi < -75) ? ORANGE : GREEN;
+          }
+          lv_obj_set_style_text_color(id(sb_wifi), lv_color_hex(wc), LV_PART_MAIN);
+
+          // Home Assistant:
+          //   красный   — соединения нет вовсе;
+          //   оранжевый — соединение есть, но состояния сущностей ещё
+          //               не поступают: подписки доезжают только после
+          //               переподключения (см. ADR-0002), и в этот момент
+          //               карточки показывают устаревшие значения;
+          //   зелёный   — связь полная, данные идут.
+          uint32_t hc = RED;
+          if (api::global_api_server->is_connected()) {
+            hc = api::global_api_server->is_connected_with_state_subscription() ? GREEN : ORANGE;
+          }
+          lv_obj_set_style_image_recolor(id(sb_ha), lv_color_hex(hc), LV_PART_MAIN);
+          lv_obj_set_style_image_recolor_opa(id(sb_ha), LV_OPA_COVER, LV_PART_MAIN);

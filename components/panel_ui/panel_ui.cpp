@@ -169,6 +169,13 @@ static lv_color_t accent_for(const std::string &type) {
   return lv_color_hex(0x5A6875);
 }
 
+// Активная страница определяется по положению прокрутки.
+static void scroll_event_cb(lv_event_t *e) {
+  auto *self = static_cast<PanelUI *>(lv_event_get_user_data(e));
+  if (self != nullptr)
+    self->sync_dots();
+}
+
 static void card_event_cb(lv_event_t *e) {
   auto *card = static_cast<PanelUI::Card *>(lv_event_get_user_data(e));
   if (card != nullptr && card->owner != nullptr)
@@ -324,6 +331,23 @@ void PanelUI::update_card_value_(Card *card, const std::string &state) {
   this->apply_state_(card, state);
 }
 
+void PanelUI::sync_dots() {
+  if (this->dots_.empty() || this->scroller_ == nullptr)
+    return;
+  auto *sc = static_cast<lv_obj_t *>(this->scroller_);
+  const int w = lv_obj_get_width(sc);
+  if (w <= 0)
+    return;
+  const int x = lv_obj_get_scroll_x(sc);
+  size_t active = (size_t) ((x + w / 2) / w);
+  if (active >= this->dots_.size())
+    active = this->dots_.size() - 1;
+  for (size_t i = 0; i < this->dots_.size(); i++) {
+    lv_obj_set_style_bg_color(static_cast<lv_obj_t *>(this->dots_[i]),
+                              lv_color_hex(i == active ? g_accent : 0x3A4753), LV_PART_MAIN);
+  }
+}
+
 void PanelUI::demo_fill() {
   // Правдоподобные значения по типам: позволяет проверить вёрстку
   // и поведение карточек, когда Home Assistant недоступен.
@@ -417,6 +441,8 @@ bool PanelUI::build_ui(void *root) {
   for (auto *c : this->cards_)
     delete c;
   this->cards_.clear();
+  this->dots_.clear();
+  this->scroller_ = nullptr;
 
   auto *par = static_cast<lv_obj_t *>(root);
   lv_obj_clean(par);
@@ -472,6 +498,7 @@ bool PanelUI::build_ui(void *root) {
     lv_obj_set_scroll_dir(scroller, LV_DIR_HOR);
     lv_obj_set_scroll_snap_x(scroller, LV_SCROLL_SNAP_CENTER);
     lv_obj_set_scrollbar_mode(scroller, LV_SCROLLBAR_MODE_OFF);
+    this->scroller_ = scroller;
 
     for (JsonObject page : pages) {
       if (page["hidden"] | false)
@@ -492,6 +519,27 @@ bool PanelUI::build_ui(void *root) {
         break;
       }
     }
+    // Точки-индикатор: со свайпом без них непонятно, где ты и сколько
+    // страниц всего. Рисуем поверх прокрутки, чтобы не уезжали вместе с ней.
+    if (n_pages > 1) {
+      const int dot = 8, dgap = 10;
+      const int total = (int) n_pages * dot + ((int) n_pages - 1) * dgap;
+      int dx = (rw - total) / 2;
+      for (size_t i = 0; i < n_pages; i++) {
+        lv_obj_t *d = lv_obj_create(par);
+        lv_obj_remove_style_all(d);
+        lv_obj_set_size(d, dot, dot);
+        lv_obj_set_pos(d, dx, rh - 18);
+        lv_obj_set_style_radius(d, dot / 2, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(d, lv_color_hex(i == 0 ? g_accent : 0x3A4753), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(d, LV_OPA_COVER, LV_PART_MAIN);
+        this->dots_.push_back(d);
+        dx += dot + dgap;
+      }
+      // Подсветка активной точки по прокрутке.
+      lv_obj_add_event_cb(scroller, scroll_event_cb, LV_EVENT_SCROLL_END, this);
+    }
+
     return n_pages > 0;
   });
 

@@ -100,7 +100,7 @@ lvgl:
                   text: "Назад"
                   align: CENTER
             on_click:
-              - lvgl.page.show: page_p0
+              - lvgl.page.show: page_layout
         - label:
             id: lbl_wifi_status
             text: "Нажмите «Искать»"
@@ -249,7 +249,7 @@ lvgl:
                         id: lbl_wifi_result
                         text: "Подключено, сохранено в памяти"
                     - delay: 2s
-                    - lvgl.page.show: page_p0
+                    - lvgl.page.show: page_layout
                   on_error:
                     - lvgl.label.update:
                         id: lbl_wifi_result

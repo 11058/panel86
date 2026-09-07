@@ -41,6 +41,9 @@ class PanelUI : public Component {
   /// Нужно, чтобы проверять вёрстку и типы карточек, когда HA недоступен.
   void demo_fill();
 
+  /// Подсветить точку активной страницы. Вызывается из обработчика прокрутки.
+  void sync_dots();
+
   bool is_mounted() const { return this->mounted_; }
 
   /// Полный путь к файлу раскладки.
@@ -105,6 +108,8 @@ class PanelUI : public Component {
   void start_http_();
 
   std::vector<Card *> cards_;
+  std::vector<void *> dots_;   // lv_obj_t * — индикатор страниц
+  void *scroller_{nullptr};    // lv_obj_t *
   const char *partition_{"storage"};
   const char *base_path_{"/fs"};
   const char *layout_file_{"layout.json"};
