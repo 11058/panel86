@@ -13,6 +13,11 @@
 
 #include "editor_html.h"
 
+#include "esp_http_client.h"
+#include "esp_crt_bundle.h"
+#include "lwip/dns.h"
+#include "lwip/ip_addr.h"
+
 #include "esphome/components/network/util.h"
 
 #include "esphome/components/json/json_util.h"
@@ -741,6 +746,132 @@ static void add_cors(httpd_req_t *req) {
 }
 
 // Предварительный запрос браузера перед POST с JSON.
+// Посредник к Home Assistant.
+//
+// Браузер к HA напрямую не пустят: предварительный запрос отвергается
+// с 403, заголовков CORS у HA по умолчанию нет. Поэтому список сущностей
+// забирает панель — ей ограничения браузера не писаны.
+//
+// Берём не /api/states (574 КиБ JSON, который панели пришлось бы разбирать),
+// а /api/template: HA сам собирает компактный список строкой, и панели
+// остаётся передать её дальше как есть. На реальной установке из 1271
+// сущности это 48 КиБ вместо 574.
+//
+// Токен НЕ сохраняется: он приходит с каждым запросом от редактора,
+// используется один раз и забывается. Долгоживущему токену на стене
+// не место (см. ADR-0002).
+static esp_err_t handle_ha_entities(httpd_req_t *req) {
+  add_cors(req);
+
+  if (req->content_len == 0 || req->content_len > 4096) {
+    httpd_resp_set_status(req, "400 Bad Request");
+    return httpd_resp_sendstr(req, "{\"error\":\"нет данных для подключения\"}");
+  }
+  std::string body;
+  body.reserve(req->content_len);
+  char rb[512];
+  size_t left = req->content_len;
+  while (left > 0) {
+    int got = httpd_req_recv(req, rb, std::min(left, sizeof(rb)));
+    if (got <= 0) {
+      httpd_resp_set_status(req, "400 Bad Request");
+      return httpd_resp_sendstr(req, "{\"error\":\"обрыв приёма\"}");
+    }
+    body.append(rb, got);
+    left -= got;
+  }
+
+  std::string ha_url, token;
+  json::parse_json(body, [&](JsonObject o) -> bool {
+    ha_url = std::string(o["url"] | "");
+    token = std::string(o["token"] | "");
+    return true;
+  });
+  while (!ha_url.empty() && ha_url.back() == '/')
+    ha_url.pop_back();
+  if (ha_url.empty() || token.empty()) {
+    httpd_resp_set_status(req, "400 Bad Request");
+    return httpd_resp_sendstr(req, "{\"error\":\"нужны адрес и токен\"}");
+  }
+
+  static const char *const TEMPLATE_BODY =
+      "{\"template\":\"{% for s in states if s.domain in ["
+      "'light','switch','climate','cover','valve','sensor','binary_sensor',"
+      "'media_player','lock','scene','script','fan','camera','number','button'] %}"
+      "{{s.entity_id}}\\t{{s.name}}\\t{{area_name(s.entity_id) or ''}}\\n{% endfor %}\"}";
+
+  // Ставим сервер имён прямо здесь. Ethernet, объявленный без кабеля,
+  // повторяет DHCP каждые 15 секунд и каждый раз затирает общие настройки
+  // имён — фоновой проверки раз в полминуты не хватает, запрос попадает
+  // в окно без DNS.
+  {
+    const ip_addr_t *cur = dns_getserver(0);
+    if (cur == nullptr || ip_addr_isany(cur)) {
+      ip_addr_t fb;
+      IP_ADDR4(&fb, 1, 1, 1, 1);
+      dns_setserver(0, &fb);
+      IP_ADDR4(&fb, 8, 8, 8, 8);
+      dns_setserver(1, &fb);
+      ESP_LOGW(TAG, "перед запросом к HA не было DNS — поставил резервный");
+    }
+  }
+
+  const std::string url = ha_url + "/api/template";
+  esp_http_client_config_t cfg = {};
+  cfg.url = url.c_str();
+  cfg.method = HTTP_METHOD_POST;
+  cfg.timeout_ms = 20000;
+  cfg.crt_bundle_attach = esp_crt_bundle_attach;
+  cfg.buffer_size = 2048;
+  cfg.buffer_size_tx = 2048;
+
+  esp_http_client_handle_t cli = esp_http_client_init(&cfg);
+  if (cli == nullptr) {
+    httpd_resp_set_status(req, "500 Internal Server Error");
+    return httpd_resp_sendstr(req, "{\"error\":\"не удалось создать клиента\"}");
+  }
+  const std::string auth = "Bearer " + token;
+  esp_http_client_set_header(cli, "Authorization", auth.c_str());
+  esp_http_client_set_header(cli, "Content-Type", "application/json");
+  esp_http_client_set_post_field(cli, TEMPLATE_BODY, strlen(TEMPLATE_BODY));
+
+  esp_err_t err = esp_http_client_open(cli, strlen(TEMPLATE_BODY));
+  if (err != ESP_OK) {
+    esp_http_client_cleanup(cli);
+    ESP_LOGW(TAG, "HA недоступен: %s", esp_err_to_name(err));
+    httpd_resp_set_status(req, "502 Bad Gateway");
+    return httpd_resp_sendstr(req, "{\"error\":\"панель не достучалась до Home Assistant\"}");
+  }
+  esp_http_client_write(cli, TEMPLATE_BODY, strlen(TEMPLATE_BODY));
+  esp_http_client_fetch_headers(cli);
+  const int status = esp_http_client_get_status_code(cli);
+
+  if (status != 200) {
+    esp_http_client_close(cli);
+    esp_http_client_cleanup(cli);
+    ESP_LOGW(TAG, "HA ответил %d", status);
+    httpd_resp_set_status(req, status == 401 ? "401 Unauthorized" : "502 Bad Gateway");
+    return httpd_resp_sendstr(req, status == 401 ? "{\"error\":\"токен не принят\"}"
+                                                 : "{\"error\":\"Home Assistant ответил ошибкой\"}");
+  }
+
+  // Отдаём потоком: список бывает в десятки килобайт, держать его целиком
+  // в памяти незачем.
+  httpd_resp_set_type(req, "text/plain; charset=utf-8");
+  char chunk[1024];
+  int n, total = 0;
+  while ((n = esp_http_client_read(cli, chunk, sizeof(chunk))) > 0) {
+    if (httpd_resp_send_chunk(req, chunk, n) != ESP_OK)
+      break;
+    total += n;
+  }
+  httpd_resp_send_chunk(req, nullptr, 0);
+  esp_http_client_close(cli);
+  esp_http_client_cleanup(cli);
+  ESP_LOGI(TAG, "список сущностей от HA: %d байт", total);
+  return ESP_OK;
+}
+
 // Редактор отдаём с самой панели: иначе им неудобно пользоваться —
 // файл пришлось бы держать на диске и вручную вписывать в него адрес.
 static esp_err_t handle_get_editor(httpd_req_t *req) {
@@ -875,8 +1006,8 @@ void PanelUI::start_http_() {
   cfg.server_port = this->http_port_;
   cfg.ctrl_port = this->http_port_ + 1000;  // иначе конфликт с web_server ESPHome
   cfg.lru_purge_enable = true;
-  cfg.max_uri_handlers = 12;
-  cfg.stack_size = 8192;
+  cfg.max_uri_handlers = 14;
+  cfg.stack_size = 20480;  // TLS-рукопожатие в 8 КиБ не помещается
 
   httpd_handle_t server = nullptr;
   esp_err_t err = httpd_start(&server, &cfg);
@@ -892,6 +1023,20 @@ void PanelUI::start_http_() {
   get_uri.handler = handle_get_layout;
   get_uri.user_ctx = this;
   httpd_register_uri_handler(server, &get_uri);
+
+  httpd_uri_t ha_uri = {};
+  ha_uri.uri = "/ha/entities";
+  ha_uri.method = HTTP_POST;
+  ha_uri.handler = handle_ha_entities;
+  ha_uri.user_ctx = this;
+  httpd_register_uri_handler(server, &ha_uri);
+
+  httpd_uri_t haopt_uri = {};
+  haopt_uri.uri = "/ha/entities";
+  haopt_uri.method = HTTP_OPTIONS;
+  haopt_uri.handler = handle_options;
+  haopt_uri.user_ctx = this;
+  httpd_register_uri_handler(server, &haopt_uri);
 
   httpd_uri_t root_uri = {};
   root_uri.uri = "/";

@@ -133,20 +133,35 @@ interval:
           char dbuf[48] = "нет";
           dns.str_to(dbuf);
 
-          // Если сервер имён не выдан, имя NTP-сервера разрешать нечем
-          // и время не придёт никогда. Наблюдалось на живой панели:
-          // DNS 0.0.0.0 при исправно полученном адресе. Похоже, виноват
-          // Ethernet — он настроен, кабеля нет, и его бесконечные попытки
-          // DHCP затирают общие настройки.
-          if (strcmp(dbuf, "0.0.0.0") == 0) {
-            ip_addr_t fallback;
-            IP_ADDR4(&fallback, 1, 1, 1, 1);
-            dns_setserver(0, &fallback);
-            IP_ADDR4(&fallback, 8, 8, 8, 8);
-            dns_setserver(1, &fallback);
-            ESP_LOGW("time", "DNS не выдан — ставлю резервный 1.1.1.1");
-          }
-
           ESP_LOGI("time", "времени нет — перезапускаю SNTP (DNS: %s)", dbuf);
           id(sntp_time).call_setup();
           id(sntp_time).update();
+
+  # Постоянный присмотр за DNS.
+  #
+  # Сервер имён на панели то и дело оказывается нулевым при исправно
+  # полученном адресе — похоже, Ethernet без кабеля бесконечно долбится
+  # в DHCP и затирает общие настройки. Без DNS не работает ни синхронизация
+  # времени, ни обращение к Home Assistant по имени.
+  #
+  # Раньше эта проверка жила внутри цикла досинхронизации времени и потому
+  # замолкала, как только время получено. Теперь смотрим всегда.
+  - interval: 5s
+    then:
+      - lambda: |-
+          if (!wifi::global_wifi_component->is_connected()) return;
+          const ip_addr_t *cur = dns_getserver(0);
+          const bool empty = (cur == nullptr) || ip_addr_isany(cur);
+          if (!empty) return;
+          ip_addr_t fb;
+          IP_ADDR4(&fb, 1, 1, 1, 1);
+          dns_setserver(0, &fb);
+          IP_ADDR4(&fb, 8, 8, 8, 8);
+          dns_setserver(1, &fb);
+          // Молча: при живом Ethernet без кабеля это срабатывает постоянно,
+          // и лог превратился бы в поток одинаковых строк.
+          static uint32_t reported = 0;
+          if (millis() - reported > 60000) {
+            reported = millis();
+            ESP_LOGW("net", "сервер имён затирается (вероятно, Ethernet без кабеля) — держу резервный 1.1.1.1");
+          }

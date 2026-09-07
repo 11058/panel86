@@ -84,6 +84,25 @@
   .fld select{min-width:190px}
   .fld input[type=checkbox]{width:20px; height:20px; accent-color:var(--accent)}
   .note{font-size:12px; color:var(--ink-3); margin:4px 0 0; max-width:60ch}
+  /* Выборщик сущностей */
+  .modal{position:fixed; inset:0; background:rgba(8,11,14,.82); display:none;
+         align-items:center; justify-content:center; z-index:50; padding:24px}
+  .modal.on{display:flex}
+  .picker{background:var(--surface); border:1px solid var(--rule); border-radius:12px;
+          width:min(760px,100%); max-height:86vh; display:flex; flex-direction:column;
+          overflow:hidden}
+  .picker header{background:var(--surface-2); padding:14px 18px; gap:10px}
+  .picker .body{overflow:auto; padding:6px 0}
+  .ent{display:flex; gap:12px; align-items:baseline; padding:9px 18px; cursor:pointer;
+       border-left:3px solid transparent}
+  .ent:hover{background:var(--surface-2); border-left-color:var(--accent)}
+  .ent .nm{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .ent .id{font-family:var(--mono); font-size:11px; color:var(--ink-3);
+           overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:46%}
+  .ent .ar{font-size:11px; color:var(--accent); white-space:nowrap}
+  .grp{padding:10px 18px 4px; font-family:var(--mono); font-size:11px; letter-spacing:.1em;
+       text-transform:uppercase; color:var(--ink-3)}
+  .pickbtn{width:100%; text-align:left; font-family:var(--mono); font-size:13px}
   .status{font-family:var(--mono); font-size:12px; padding:8px 12px; border-radius:6px;
           margin-top:14px; display:none; white-space:pre-wrap}
   .status.ok{display:block; background:#122a2c; color:var(--good); border:1px solid #1d4247}
@@ -100,6 +119,7 @@
   <div class="tabs">
     <button id="tabLayout" class="tab on">Раскладка</button>
     <button id="tabSettings" class="tab">Настройки</button>
+    <button id="tabHA" class="tab">Home Assistant</button>
   </div>
   <input id="host" class="mono" placeholder="10.1.20.115:8080" style="width:190px">
   <button id="load">Загрузить с панели</button>
@@ -156,6 +176,41 @@
   </div>
 </section>
 
+<section id="paneHA" style="display:none; padding:24px 28px">
+  <div class="form">
+    <h3>Подключение к Home Assistant</h3>
+    <p class="note" style="margin-bottom:14px">
+      Нужно только редактору — чтобы показывать список сущностей вместо
+      ручного ввода идентификаторов. Адрес и токен хранятся в этом браузере
+      и на панель не записываются: за списком панель ходит по разовому
+      запросу и сразу забывает токен.
+    </p>
+    <label>Адрес Home Assistant</label>
+    <input id="haUrl" class="mono" style="width:100%" placeholder="https://homeassistant.local:8123">
+    <label>Долгоживущий токен</label>
+    <input id="haToken" class="mono" type="password" style="width:100%" placeholder="создаётся в профиле пользователя HA">
+    <div class="row" style="margin-top:16px">
+      <button id="haLoad" class="primary">Загрузить сущности</button>
+      <button id="haForget" class="danger">Забыть</button>
+    </div>
+    <div class="status" id="status3"></div>
+
+    <h3>Что загружено</h3>
+    <div id="haSummary" class="hint">Сущности не загружены.</div>
+  </div>
+</section>
+
+<div class="modal" id="pickModal">
+  <div class="picker">
+    <header class="row">
+      <input id="pickSearch" placeholder="поиск по названию, комнате или идентификатору" style="flex:1">
+      <select id="pickDomain" style="width:170px"><option value="">все типы</option></select>
+      <button id="pickClose">Закрыть</button>
+    </header>
+    <div class="body" id="pickBody"></div>
+  </div>
+</div>
+
 <main id="paneLayout">
   <!-- ЛЕВО: страницы и тема -->
   <section>
@@ -209,7 +264,9 @@
       <label>Тип</label>
       <select id="cType" style="width:100%"></select>
       <label>Сущность Home Assistant</label>
-      <input id="cEntity" class="mono" style="width:100%" placeholder="light.kitchen">
+      <button id="cPick" class="pickbtn">выбрать…</button>
+      <input id="cEntity" class="mono" style="width:100%; margin-top:6px" placeholder="light.kitchen">
+      <p class="hint" id="cEntName"></p>
       <label>Подпись</label>
       <input id="cLabel" style="width:100%" placeholder="как назвать на экране">
       <div id="numFields">
@@ -335,7 +392,7 @@ function render(){
       const unit = card.unit ? " " + card.unit : "";
       const shown = /^[\d.]+$/.test(val) ? val + unit : val;
       el.innerHTML =
-        '<div class="n">' + esc(card.label || card.entity || card.type) + '</div>' +
+        '<div class="n">' + esc(card.label || entName(card.entity) || card.entity || card.type) + '</div>' +
         '<div class="v" style="color:'+acc+'">' + esc(shown) + '</div>' +
         '<div class="s">' + (CONTROLLABLE.has(card.type) ? "нажмите, чтобы переключить"
                                                          : esc(card.unit || "")) + '</div>';
@@ -352,6 +409,8 @@ function render(){
     const sel = $("cType");
     sel.innerHTML = TYPES.map(t => '<option'+(t===c.type?' selected':'')+'>'+t+'</option>').join("");
     $("cEntity").value = c.entity || "";
+    $("cPick").textContent = c.entity || "выбрать…";
+    $("cEntName").textContent = c.entity ? (entName(c.entity) || "нет в загруженном списке") : "";
     $("cLabel").value  = c.label  || "";
     $("cUnit").value   = c.unit   || "";
     $("cDec").value    = c.decimals ?? 1;
@@ -546,14 +605,19 @@ function say2(msg, bad){
 
 function setTab(name){
   tab = name;
-  $("paneLayout").style.display  = name === "layout"   ? "" : "none";
+  $("paneLayout").style.display   = name === "layout"   ? "" : "none";
   $("paneSettings").style.display = name === "settings" ? "" : "none";
+  $("paneHA").style.display       = name === "ha"       ? "" : "none";
   $("tabLayout").className   = "tab" + (name === "layout"   ? " on" : "");
   $("tabSettings").className = "tab" + (name === "settings" ? " on" : "");
+  $("tabHA").className       = "tab" + (name === "ha"       ? " on" : "");
   const layoutOnly = name === "layout";
   $("fromFile").style.display = layoutOnly ? "" : "none";
   $("toFile").style.display   = layoutOnly ? "" : "none";
+  $("load").style.display = name === "ha" ? "none" : "";
+  $("save").style.display = name === "ha" ? "none" : "";
 }
+$("tabHA").onclick = () => setTab("ha");
 $("tabLayout").onclick   = () => setTab("layout");
 $("tabSettings").onclick = () => { setTab("settings"); if (!settings) loadSettings(); };
 
@@ -590,7 +654,141 @@ async function saveSettings(){
   } catch(e){ say2("Не удалось отправить: " + e.message, true); }
 }
 
+// ---------------------------------------------------------------------------
+// Home Assistant: список сущностей и выборщик
+// ---------------------------------------------------------------------------
+let entities = [];              // {id, name, area, domain}
+let pickTarget = null;          // куда положить выбранное
+
+function say3(msg, bad){
+  const s = $("status3");
+  s.className = "status " + (bad ? "err" : "ok");
+  s.textContent = msg;
+}
+
+function entName(id){
+  const e = entities.find(x => x.id === id);
+  return e ? e.name : "";
+}
+
+async function haLoad(){
+  const url = $("haUrl").value.trim().replace(/\/+$/,"");
+  const token = $("haToken").value.trim();
+  if (!url || !token) return say3("Нужны адрес и токен", true);
+  say3("Панель идёт к Home Assistant за списком…");
+  try {
+    // Запрос делает ПАНЕЛЬ: браузер к HA напрямую не пустят, у него
+    // нет заголовков CORS, а предварительный запрос отвергается с 403.
+    const r = await fetch(base()+"/ha/entities", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({url, token})
+    });
+    const text = await r.text();
+    if (!r.ok) throw new Error(text.slice(0,120));
+
+    entities = text.split("\n").map(l => l.split("\t"))
+      .filter(p => p.length >= 2 && p[0].includes("."))
+      .map(p => ({id:p[0], name:(p[1]||p[0]).trim(), area:(p[2]||"").trim(),
+                  domain:p[0].split(".")[0]}));
+
+    try {
+      localStorage.setItem("panel86.haUrl", url);
+      localStorage.setItem("panel86.haToken", token);
+    } catch(_){}
+
+    const doms = [...new Set(entities.map(e => e.domain))].sort();
+    $("pickDomain").innerHTML = '<option value="">все типы</option>' +
+      doms.map(d => `<option>${d}</option>`).join("");
+
+    const areas = {};
+    for (const e of entities) areas[e.area || "— без комнаты —"] = (areas[e.area || "— без комнаты —"]||0)+1;
+    $("haSummary").innerHTML =
+      `<b>${entities.length}</b> сущностей, ${doms.length} типов.<br><br>` +
+      Object.entries(areas).sort((a,b) => b[1]-a[1])
+        .map(([a,n]) => `${esc(a)} — ${n}`).join("<br>");
+    say3("Загружено " + entities.length + " сущностей");
+    render();
+  } catch(e){ say3("Не получилось: " + e.message, true); }
+}
+
+$("haLoad").onclick = haLoad;
+$("haForget").onclick = () => {
+  entities = [];
+  $("haToken").value = "";
+  try { localStorage.removeItem("panel86.haToken"); } catch(_){}
+  $("haSummary").textContent = "Сущности не загружены.";
+  say3("Токен забыт");
+  render();
+};
+
+// --- выборщик ---
+function openPicker(onPick){
+  if (!entities.length){
+    setTab("ha");
+    return say3("Сначала загрузите сущности", true);
+  }
+  pickTarget = onPick;
+  $("pickSearch").value = "";
+  $("pickModal").className = "modal on";
+  renderPicker();
+  $("pickSearch").focus();
+}
+$("pickClose").onclick = () => $("pickModal").className = "modal";
+$("pickModal").onclick = e => { if (e.target === $("pickModal")) $("pickClose").click(); };
+$("pickSearch").addEventListener("input", renderPicker);
+$("pickDomain").addEventListener("change", renderPicker);
+
+function renderPicker(){
+  const q = $("pickSearch").value.trim().toLowerCase();
+  const dom = $("pickDomain").value;
+  const hits = entities.filter(e =>
+    (!dom || e.domain === dom) &&
+    (!q || e.id.toLowerCase().includes(q) || e.name.toLowerCase().includes(q)
+        || e.area.toLowerCase().includes(q)));
+
+  // Группируем по комнате: на панели человек мыслит комнатами,
+  // а не идентификаторами.
+  const byArea = {};
+  for (const e of hits.slice(0, 400))
+    (byArea[e.area || "— без комнаты —"] ||= []).push(e);
+
+  const body = $("pickBody");
+  body.innerHTML = "";
+  if (!hits.length){ body.innerHTML = '<div class="grp">ничего не найдено</div>'; return; }
+
+  for (const area of Object.keys(byArea).sort()){
+    const g = document.createElement("div");
+    g.className = "grp"; g.textContent = area + " · " + byArea[area].length;
+    body.append(g);
+    for (const e of byArea[area]){
+      const row = document.createElement("div");
+      row.className = "ent";
+      row.innerHTML = `<span class="nm">${esc(e.name)}</span>` +
+                      `<span class="id">${esc(e.id)}</span>`;
+      row.onclick = () => { pickTarget && pickTarget(e); $("pickClose").click(); };
+      body.append(row);
+    }
+  }
+  if (hits.length > 400){
+    const g = document.createElement("div");
+    g.className = "grp";
+    g.textContent = `показаны первые 400 из ${hits.length} — уточните поиск`;
+    body.append(g);
+  }
+}
+
+$("cPick").onclick = () => openPicker(e => {
+  const c = cur();
+  c.entity = e.id;
+  if (!c.label) c.label = e.name;
+  // Тип карточки подсказываем по домену: он почти всегда совпадает.
+  if (TYPES.includes(e.domain)) c.type = e.domain;
+  render();
+});
+
 $("host").value = localStorage.getItem("panel86.host") || "";
+$("haUrl").value = localStorage.getItem("panel86.haUrl") || "";
+$("haToken").value = localStorage.getItem("panel86.haToken") || "";
 // Открыт с панели — сразу подтягиваем то, что на ней лежит.
 if (location.protocol.startsWith("http")) {
   $("host").placeholder = "эта панель";
