@@ -11,6 +11,8 @@
 #include "esp_littlefs.h"
 #include "esp_http_server.h"
 
+#include "editor_html.h"
+
 #include "esphome/components/network/util.h"
 
 #include "esphome/components/json/json_util.h"
@@ -739,6 +741,14 @@ static void add_cors(httpd_req_t *req) {
 }
 
 // Предварительный запрос браузера перед POST с JSON.
+// Редактор отдаём с самой панели: иначе им неудобно пользоваться —
+// файл пришлось бы держать на диске и вручную вписывать в него адрес.
+static esp_err_t handle_get_editor(httpd_req_t *req) {
+  add_cors(req);
+  httpd_resp_set_type(req, "text/html; charset=utf-8");
+  return httpd_resp_send(req, EDITOR_HTML, HTTPD_RESP_USE_STRLEN);
+}
+
 static esp_err_t handle_get_settings(httpd_req_t *req) {
   auto *self = static_cast<PanelUI *>(req->user_ctx);
   add_cors(req);
@@ -865,7 +875,7 @@ void PanelUI::start_http_() {
   cfg.server_port = this->http_port_;
   cfg.ctrl_port = this->http_port_ + 1000;  // иначе конфликт с web_server ESPHome
   cfg.lru_purge_enable = true;
-  cfg.max_uri_handlers = 10;
+  cfg.max_uri_handlers = 12;
   cfg.stack_size = 8192;
 
   httpd_handle_t server = nullptr;
@@ -882,6 +892,13 @@ void PanelUI::start_http_() {
   get_uri.handler = handle_get_layout;
   get_uri.user_ctx = this;
   httpd_register_uri_handler(server, &get_uri);
+
+  httpd_uri_t root_uri = {};
+  root_uri.uri = "/";
+  root_uri.method = HTTP_GET;
+  root_uri.handler = handle_get_editor;
+  root_uri.user_ctx = this;
+  httpd_register_uri_handler(server, &root_uri);
 
   httpd_uri_t set_uri = {};
   set_uri.uri = "/settings.json";
@@ -918,7 +935,7 @@ void PanelUI::start_http_() {
   post_uri.user_ctx = this;
   httpd_register_uri_handler(server, &post_uri);
 
-  ESP_LOGI(TAG, "приём раскладки: http://<панель>:%u/layout.json", this->http_port_);
+  ESP_LOGI(TAG, "веб-интерфейс: http://<адрес панели>:%u/", this->http_port_);
 }
 
 }  // namespace panel_ui

@@ -1,3 +1,8 @@
+// Сгенерировано tools/gen_editor_header.py из editor/index.html.
+// Не править вручную: правки затрёт следующая генерация.
+#pragma once
+
+static const char EDITOR_HTML[] = R"PANELEDITOR(
 <!doctype html>
 <html lang="ru">
 <head>
@@ -604,3 +609,5 @@ render();
 </script>
 </body>
 </html>
+
+)PANELEDITOR";
