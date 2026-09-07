@@ -277,7 +277,11 @@ static const char EDITOR_HTML[] = R"PANELEDITOR(
     <div class="row">
       <input id="tAccent" type="color" style="width:52px; padding:2px">
       <input id="tAccentHex" class="mono" style="width:100px">
+      <button id="tAccentAuto">как в HA</button>
     </div>
+    <p class="hint">Без своего акцента карточки красятся цветами состояний
+      Home Assistant: жёлтый свет, оранжевый нагрев, синее охлаждение.
+      Их человек уже знает по веб-морде и телефону.</p>
     <label>Скругление</label>
     <input id="tRadius" type="number" min="0" max="48">
 
@@ -453,6 +457,14 @@ static const char EDITOR_HTML[] = R"PANELEDITOR(
           <input id="cWarnAbove" type="number" step="0.1" placeholder="выше">
           <input id="cWarnBelow" type="number" step="0.1" placeholder="ниже">
         </div>
+        <label>График</label>
+        <div class="row" style="gap:14px; margin-top:2px">
+          <label style="margin:0"><input id="cGraph" type="checkbox"> показывать тенденцию</label>
+        </div>
+        <p class="hint">Линия справа на карточке. История копится на самой
+          панели из приходящих значений — одно число не отвечает на главный
+          вопрос, растёт величина или падает.</p>
+
         <label>Не перерисовывать чаще</label>
         <input id="cThrottle" class="mono" style="width:100%" placeholder="1s">
         <label>Порог изменения</label>
@@ -525,8 +537,9 @@ function render(){
   $("pTitle").value = page.title || "";
   const [cols, rows] = page.grid || [2,3];
   $("pCols").value = cols; $("pRows").value = rows;
-  $("tAccent").value = doc.theme?.accent || "#C2610C";
-  $("tAccentHex").value = doc.theme?.accent || "#C2610C";
+  $("tAccent").value = doc.theme?.accent || "#FFC107";
+  $("tAccentHex").value = doc.theme?.accent || "";
+  $("tAccentHex").placeholder = "как в HA";
   $("tRadius").value = doc.theme?.radius ?? 16;
   $("dThrottle").value = doc.defaults?.throttle ?? "1s";
   $("dDeadband").value = doc.defaults?.deadband ?? 0.5;
@@ -690,6 +703,7 @@ function render(){
     $("cSpanH").value = c.span?.[1] ?? 1;
     $("cWarnAbove").value = c.warn_above ?? "";
     $("cWarnBelow").value = c.warn_below ?? "";
+    $("cGraph").checked = !!c.graph;
     $("cThrottle").value = c.throttle ?? "";
     $("cDead").value = c.deadband ?? "";
     $("cIcon").value = c.icon ?? "";
@@ -747,6 +761,7 @@ bind("cSpanH",  e => { const c=cur(); c.span = [c.span?.[0] || 1, clamp(+e.targe
 bind("cDec",    e => { cur().decimals = clamp(+e.target.value,0,3); render(); });
 bind("cWarnAbove", e => { const v=e.target.value; if(v==="") delete cur().warn_above; else cur().warn_above=+v; render(); });
 bind("cWarnBelow", e => { const v=e.target.value; if(v==="") delete cur().warn_below; else cur().warn_below=+v; render(); });
+bind("cGraph", e => { if (e.target.checked) cur().graph = true; else delete cur().graph; render(); }, "change");
 bind("cThrottle", e => { const v=e.target.value.trim(); if(!v) delete cur().throttle; else cur().throttle=v; render(); });
 bind("cDead",     e => { const v=e.target.value; if(v==="") delete cur().deadband; else cur().deadband=+v; render(); });
 bind("cIcon",     e => { const v=e.target.value; if(!v) delete cur().icon; else cur().icon=v; render(); }, "change");
@@ -962,6 +977,8 @@ function renderRowButtons(c){
   });
 }
 $("rowAdd").onclick = () => { const c = cur(); (c.buttons ||= []).push({label:"",entity:""}); render(); };
+
+$("tAccentAuto").onclick = () => { delete doc.theme.accent; render(); };
 
 $("delCard").onclick = () => { doc.pages[pageIx].cards.splice(cardIx,1); cardIx=-1; render(); };
 $("addPage").onclick = () => {

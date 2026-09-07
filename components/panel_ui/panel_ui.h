@@ -3,6 +3,8 @@
 #include "esphome/core/component.h"
 
 #include <cmath>
+
+#include "lvgl.h"
 #include <string>
 #include <vector>
 
@@ -176,8 +178,13 @@ class PanelUI : public Component {
     void *icon_box{nullptr};   // lv_obj_t * — сам круг
     void *fill{nullptr};       // lv_obj_t * — заливка по яркости
     void *ctl_value{nullptr};  // lv_obj_t * — значение в органах управления на карточке
+    void *spark{nullptr};      // lv_obj_t * — спарклайн у датчика
+    bool  want_graph{false};
+    std::vector<float> history;   // накопленные значения для спарклайна
+    std::vector<lv_point_precise_t> spark_pts;  // точки линии, живут вместе с карточкой
     int   level{-1};           // яркость 0..100, -1 если неизвестно
     bool  active{false};
+    std::string state;
 
     // Живые значения атрибутов. Нужны, чтобы подробности открывались
     // на текущих значениях, а не на выдуманных: иначе ползунок уставки
@@ -254,6 +261,7 @@ class PanelUI : public Component {
                        int step_v);
   void update_card_value_(Card *card, const std::string &state);
   void update_card_level_(Card *card, int level);
+  void draw_spark_(Card *card);
 
  public:
   /// Перекрасить карточку под текущий цвет лампы. Публично, потому что

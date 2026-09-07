@@ -32,6 +32,9 @@ lvgl:
             id: zoo_arc
             width: 10
             height: 10
+        - line:
+            id: zoo_line
+            points: [[0, 0], [5, 5]]
 
     - id: page_layout
       widgets:

@@ -422,13 +422,40 @@ static uint32_t card_ink()     { return g_dark ? 0xE3E9EE : 0x141C24; }
 static uint32_t card_ink2()    { return g_dark ? 0x9AA8B4 : 0x4E5D6B; }
 static uint32_t card_ink3()    { return g_dark ? 0x6B7B88 : 0x7C8B99; }
 
-static lv_color_t accent_for(const std::string &type) {
-  if (type == "light" || type == "switch" || type == "scene" || type == "script")
+// Цвета состояний как в Home Assistant. Человек уже видел их в веб-морде
+// и на телефоне: жёлтый свет, оранжевый нагрев, синее охлаждение. Свой
+// набор цветов заставлял бы учить его заново.
+//
+// Акцент темы перекрывает эти цвета, если владелец задал свой: право
+// последнего слова за ним, а не за нашими умолчаниями.
+static bool g_accent_custom = false;
+
+static lv_color_t state_color(const std::string &type, const std::string &state) {
+  if (g_accent_custom)
     return lv_color_hex(g_accent);
-  if (type == "climate") return lv_color_hex(0xA83232);
-  if (type == "valve" || type == "cover") return lv_color_hex(0x2E6DA4);
-  return lv_color_hex(0x5A6875);
+
+  if (type == "climate") {
+    if (state == "heat")     return lv_color_hex(0xFF8100);
+    if (state == "cool")     return lv_color_hex(0x2196F3);
+    if (state == "dry")      return lv_color_hex(0xFFC107);
+    if (state == "fan_only") return lv_color_hex(0x00BCD4);
+    if (state == "auto" || state == "heat_cool") return lv_color_hex(0x4CAF50);
+    return lv_color_hex(0x8A94A0);
+  }
+  if (type == "light" || type == "switch")        return lv_color_hex(0xFFC107);
+  if (type == "scene" || type == "script")        return lv_color_hex(0xFFC107);
+  if (type == "cover")                            return lv_color_hex(0xFFC107);
+  if (type == "valve")                            return lv_color_hex(0x2196F3);
+  if (type == "fan")                              return lv_color_hex(0x66BB6A);
+  if (type == "media")                            return lv_color_hex(0x5C6BC0);
+  if (type == "lock")
+    return state == "locked" ? lv_color_hex(0x4CAF50) : lv_color_hex(0xF44336);
+  if (type == "camera")                           return lv_color_hex(0x9575CD);
+  if (type == "binary_sensor")                    return lv_color_hex(0xFFC107);
+  return lv_color_hex(0x8A94A0);
 }
+
+static lv_color_t accent_for(const std::string &type) { return state_color(type, ""); }
 
 // Активная страница определяется по положению прокрутки.
 static void scroll_event_cb(lv_event_t *e) {
@@ -546,9 +573,11 @@ static void sheet_action_free_cb(lv_event_t *e) {
 // Иначе цвет по типу. Так карточка тёплого света выглядит тёплой,
 // а холодного — холодной, как в образце.
 static lv_color_t card_color(const PanelUI::Card *card) {
-  if (card->rgb >= 0 && card->active)
+  // Настоящий цвет лампы важнее табличного: если свет розовый, карточка
+  // должна быть розовой.
+  if (card->rgb >= 0 && card->active && !g_accent_custom)
     return lv_color_hex(static_cast<uint32_t>(card->rgb));
-  return accent_for(card->type);
+  return state_color(card->type, card->state);
 }
 
 // Иконка карточки. Своя из раскладки имеет приоритет, иначе разумная
@@ -850,6 +879,22 @@ void PanelUI::render_card_(void *parent, Card *card, int x, int y, int w, int h)
 
   if (ctl_w > 0)
     this->build_inline_controls(box, card, w, h, ctl_w);
+
+  // Спарклайн у датчика: показывает, куда движется величина. Одно число
+  // не отвечает на главный вопрос — растёт или падает.
+  //
+  // История копится на самой панели, из приходящих состояний. Запрашивать
+  // её у Home Assistant пришлось бы отдельным тяжёлым запросом на каждую
+  // карточку, а для «видно ли тенденцию» хватает и накопленного.
+  if (card->want_graph && !stacked) {
+    lv_obj_t *sp = lv_line_create(box);
+    lv_obj_set_size(sp, std::min(w / 3, 180), h - 30);
+    lv_obj_align(sp, LV_ALIGN_RIGHT_MID, -14, 0);
+    lv_obj_set_style_line_width(sp, 3, LV_PART_MAIN);
+    lv_obj_set_style_line_color(sp, accent, LV_PART_MAIN);
+    lv_obj_set_style_line_rounded(sp, true, LV_PART_MAIN);
+    card->spark = sp;
+  }
 
   const bool controllable =
       card->type == "light" || card->type == "switch" || card->type == "valve" ||
@@ -1156,6 +1201,7 @@ void PanelUI::apply_state_(Card *card, const std::string &state) {
   if (value == nullptr)
     return;
 
+  card->state = state;
   std::string shown = humanize(state);
 
   bool numeric = false;
@@ -1230,6 +1276,37 @@ void PanelUI::apply_state_(Card *card, const std::string &state) {
   }
 }
 
+// Отрисовка спарклайна. Точки живут в самой карточке: lv_line не копирует
+// массив, а держит указатель — временный вектор привёл бы к мусору
+// на экране или падению.
+void PanelUI::draw_spark_(Card *card) {
+  auto *sp = static_cast<lv_obj_t *>(card->spark);
+  if (sp == nullptr || card->history.size() < 2)
+    return;
+
+  const int w = lv_obj_get_width(sp);
+  const int h = lv_obj_get_height(sp);
+  if (w <= 4 || h <= 4)
+    return;
+
+  float lo = card->history[0], hi = card->history[0];
+  for (float v : card->history) {
+    if (v < lo) lo = v;
+    if (v > hi) hi = v;
+  }
+  const float span = (hi - lo) > 0.0001f ? (hi - lo) : 1.0f;
+
+  const size_t n = card->history.size();
+  card->spark_pts.resize(n);
+  for (size_t i = 0; i < n; i++) {
+    card->spark_pts[i].x = static_cast<int32_t>(i * (w - 1) / (n - 1));
+    // Ось Y экрана растёт вниз, значение — вверх: инвертируем.
+    card->spark_pts[i].y =
+        static_cast<int32_t>((1.0f - (card->history[i] - lo) / span) * (h - 4)) + 2;
+  }
+  lv_line_set_points(sp, card->spark_pts.data(), n);
+}
+
 void PanelUI::update_card_value_(Card *card, const std::string &state) {
   if (card->lbl_value == nullptr)
     return;
@@ -1251,6 +1328,13 @@ void PanelUI::update_card_value_(Card *card, const std::string &state) {
   }
   card->last_num = numeric ? num : NAN;
   card->last_draw = now;
+
+  if (numeric && card->spark != nullptr) {
+    card->history.push_back(num);
+    if (card->history.size() > 40)
+      card->history.erase(card->history.begin());
+    this->draw_spark_(card);
+  }
 
   ESP_LOGD(TAG, "карточка '%s' (%s) <- %s", card->label.c_str(), card->entity.c_str(), state.c_str());
   this->apply_state_(card, state);
@@ -1409,6 +1493,7 @@ void PanelUI::render_page_(void *tile, const void *page_json, int w, int h) {
         card->buttons.push_back(rb);
     }
 
+    card->want_graph = jc["graph"] | false;
     card->deadband = jc["deadband"] | this->def_deadband_;
     card->throttle_ms = parse_ms(jc["throttle"] | this->def_throttle_.c_str());
     card->warn_above = jc["warn_above"] | NAN;
@@ -1522,8 +1607,13 @@ bool PanelUI::build_ui(void *root) {
     JsonObject theme = doc["theme"].as<JsonObject>();
     if (!theme.isNull()) {
       const char *acc = theme["accent"] | "";
-      if (acc[0] == '#' && strlen(acc) == 7)
+      if (acc[0] == '#' && strlen(acc) == 7) {
         g_accent = strtoul(acc + 1, nullptr, 16);
+        // Пустой акцент означает «цвета как в Home Assistant».
+        g_accent_custom = true;
+      } else {
+        g_accent_custom = false;
+      }
       this->theme_radius_ = theme["radius"] | 16;
     }
     JsonObject defs = doc["defaults"].as<JsonObject>();
