@@ -28,6 +28,10 @@ lvgl:
             id: zoo_bar
             width: 10
             height: 10
+        - arc:
+            id: zoo_arc
+            width: 10
+            height: 10
 
     - id: page_layout
       widgets:

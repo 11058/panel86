@@ -43,6 +43,7 @@ class PanelUI : public Component {
     this->font_value_ = value;
     this->font_small_ = small;
     this->font_icon_ = icon;
+    this->font_body_ = value;  // «обычный» и «значение» — один и тот же набор
   }
 
   // --- Настройки панели -------------------------------------------------
@@ -134,6 +135,7 @@ class PanelUI : public Component {
     void *icon{nullptr};       // lv_obj_t * — символ в круге
     void *icon_box{nullptr};   // lv_obj_t * — сам круг
     void *fill{nullptr};       // lv_obj_t * — заливка по яркости
+    void *ctl_value{nullptr};  // lv_obj_t * — значение в органах управления на карточке
     int   level{-1};           // яркость 0..100, -1 если неизвестно
     bool  active{false};
 
@@ -182,6 +184,8 @@ class PanelUI : public Component {
   /// Вызвать действие для конкретной сущности — для полосы кнопок,
   /// где у каждой кнопки своя.
   void call_service_for(const std::string &entity, const std::string &service);
+  void call_service_for_with(const std::string &entity, const std::string &service,
+                             const std::string &key, const std::string &value);
 
   size_t card_count() const { return this->cards_.size(); }
 
@@ -196,6 +200,10 @@ class PanelUI : public Component {
  protected:
   void render_page_(void *tile, const void *page_json, int w, int h);
   void render_card_(void *parent, Card *card, int x, int y, int w, int h);
+  void build_inline_controls(void *box, Card *card, int w, int h, int ctl_w);
+  void build_step_pill(void *parent, Card *card, int x, int y, int w, int h,
+                       const std::string &service, const std::string &key, int lo, int hi,
+                       int step_v);
   void update_card_value_(Card *card, const std::string &state);
   void update_card_level_(Card *card, int level);
 
@@ -233,6 +241,7 @@ class PanelUI : public Component {
   const void *font_value_{nullptr};
   const void *font_small_{nullptr};
   const void *font_icon_{nullptr};
+  const void *font_body_{nullptr};
   void *root_{nullptr};   // lv_obj_t *
   void *httpd_{nullptr};  // httpd_handle_t
   bool mounted_{false};

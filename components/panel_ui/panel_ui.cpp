@@ -406,7 +406,48 @@ struct SheetAction {
   std::string service;
   std::string key;
   std::string value;
+  PanelUI::Card *card{nullptr};
+  void *label_obj{nullptr};   // lv_obj_t * — что обновлять при нажатии
+  int lo{0};
+  int hi{100};
+  int step{1};
 };
+
+
+// Шаг значения. Отталкиваемся от живого состояния, а не от выдуманного:
+// иначе первое нажатие уводит climate неизвестно куда.
+static void step_pill_cb(lv_event_t *e) {
+  auto *a = static_cast<SheetAction *>(lv_event_get_user_data(e));
+  if (a == nullptr || a->card == nullptr)
+    return;
+  const int dir = (a->value == "+") ? 1 : -1;
+  int shown = 0;
+  char sent[16], text[16];
+
+  if (a->key == "temperature") {
+    float t = std::isnan(a->card->target_temp) ? 22.0f : a->card->target_temp;
+    t += dir * a->step;
+    if (t < a->lo) t = a->lo;
+    if (t > a->hi) t = a->hi;
+    a->card->target_temp = t;
+    snprintf(sent, sizeof(sent), "%.0f", t);
+    snprintf(text, sizeof(text), "%.1f°", t);
+  } else {
+    int v = (a->key == "brightness_pct") ? (a->card->level > 0 ? a->card->level : 50)
+                                         : (a->card->fan_pct >= 0 ? a->card->fan_pct : 50);
+    v += dir * a->step;
+    if (v < a->lo) v = a->lo;
+    if (v > a->hi) v = a->hi;
+    if (a->key == "brightness_pct") a->card->level = v; else a->card->fan_pct = v;
+    shown = v;
+    snprintf(sent, sizeof(sent), "%d", v);
+    snprintf(text, sizeof(text), "%d %%", shown);
+  }
+
+  if (a->label_obj != nullptr)
+    lv_label_set_text(static_cast<lv_obj_t *>(a->label_obj), text);
+  a->self->call_service_for_with(a->card->entity, a->service, a->key, sent);
+}
 
 // Кнопка в полосе: сущность лежит в value, потому что у каждой кнопки
 // она своя, в отличие от подробностей, где сущность общая для панели.
@@ -426,6 +467,15 @@ static void sheet_action_cb(lv_event_t *e) {
 
 static void sheet_action_free_cb(lv_event_t *e) {
   delete static_cast<SheetAction *>(lv_event_get_user_data(e));
+}
+
+// Цвет карточки: если лампа сообщила свой RGB и горит — берём его.
+// Иначе цвет по типу. Так карточка тёплого света выглядит тёплой,
+// а холодного — холодной, как в образце.
+static lv_color_t card_color(const PanelUI::Card *card) {
+  if (card->rgb >= 0 && card->active)
+    return lv_color_hex(static_cast<uint32_t>(card->rgb));
+  return accent_for(card->type);
 }
 
 // Иконка карточки. Своя из раскладки имеет приоритет, иначе разумная
@@ -462,19 +512,40 @@ void PanelUI::render_card_(void *parent, Card *card, int x, int y, int w, int h)
     lv_obj_set_pos(wrap, x, y);
     lv_obj_set_size(wrap, w, h);
 
+    // Иконка и подпись по центру, линии по обе стороны. Так раздел
+    // читается как заголовок, а не как ещё одна строка списка.
+    lv_obj_t *ico = lv_label_create(wrap);
+    lv_label_set_text(ico, icon_for(card->type, card->icon_name));
+    lv_obj_set_style_text_color(ico, lv_color_hex(card_ink2()), LV_PART_MAIN);
+    if (this->font_icon_ != nullptr)
+      lv_obj_set_style_text_font(ico, static_cast<const lv_font_t *>(this->font_icon_), LV_PART_MAIN);
+
     lv_obj_t *lbl = lv_label_create(wrap);
     lv_label_set_text(lbl, card->label.c_str());
-    lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 6, 0);
     lv_obj_set_style_text_color(lbl, lv_color_hex(card_ink2()), LV_PART_MAIN);
-    if (this->font_small_ != nullptr)
-      lv_obj_set_style_text_font(lbl, static_cast<const lv_font_t *>(this->font_small_), LV_PART_MAIN);
+    if (this->font_body_ != nullptr)
+      lv_obj_set_style_text_font(lbl, static_cast<const lv_font_t *>(this->font_body_), LV_PART_MAIN);
 
-    lv_obj_t *line = lv_obj_create(wrap);
-    lv_obj_remove_style_all(line);
-    lv_obj_set_size(line, w - 12, 2);
-    lv_obj_align(line, LV_ALIGN_BOTTOM_LEFT, 6, -4);
-    lv_obj_set_style_bg_color(line, lv_color_hex(card_ink3()), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(line, LV_OPA_40, LV_PART_MAIN);
+    lv_obj_update_layout(wrap);
+    const int iw = lv_obj_get_width(ico);
+    const int lw = lv_obj_get_width(lbl);
+    const int gap2 = 10;
+    const int total = iw + gap2 + lw;
+    const int cx0 = (w - total) / 2;
+    lv_obj_align(ico, LV_ALIGN_LEFT_MID, cx0, 0);
+    lv_obj_align(lbl, LV_ALIGN_LEFT_MID, cx0 + iw + gap2, 0);
+
+    const int lineW = cx0 - 24;
+    if (lineW > 10) {
+      for (int side = 0; side < 2; side++) {
+        lv_obj_t *line = lv_obj_create(wrap);
+        lv_obj_remove_style_all(line);
+        lv_obj_set_size(line, lineW, 2);
+        lv_obj_align(line, side == 0 ? LV_ALIGN_LEFT_MID : LV_ALIGN_RIGHT_MID, side == 0 ? 6 : -6, 0);
+        lv_obj_set_style_bg_color(line, lv_color_hex(card_ink3()), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(line, LV_OPA_40, LV_PART_MAIN);
+      }
+    }
 
     card->box = wrap;
     card->owner = this;
@@ -579,13 +650,17 @@ void PanelUI::render_card_(void *parent, Card *card, int x, int y, int w, int h)
     return;
   }
 
-  // «Пузырь»: сильное скругление, без рамки, мягкий фон. Форма и есть
-  // основной опознавательный признак — по ней карточка читается быстрее,
-  // чем по подписи.
+  // Карточка-строка: иконка в скруглённом квадрате слева, имя и состояние
+  // в две строки, органы управления справа. Такой ряд читается сверху вниз
+  // как список, а не как поле одинаковых плиток, и в него помещается
+  // управление без захода в подробности.
   lv_obj_t *box = lv_obj_create(par);
   lv_obj_set_pos(box, x, y);
   lv_obj_set_size(box, w, h);
-  const int r = std::min(h, w) / 2 > 34 ? 34 : std::min(h, w) / 2;
+  // Полная пилюля: скругление равно половине высоты. Именно эта форма
+  // и делает карточку узнаваемой в Bubble Card — не «скруглённый
+  // прямоугольник», а капсула.
+  const int r = h / 2;
   lv_obj_set_style_radius(box, r, LV_PART_MAIN);
   lv_obj_set_style_border_width(box, 0, LV_PART_MAIN);
   lv_obj_set_style_bg_color(box, lv_color_hex(card_bg()), LV_PART_MAIN);
@@ -593,15 +668,11 @@ void PanelUI::render_card_(void *parent, Card *card, int x, int y, int w, int h)
   lv_obj_set_style_pad_all(box, 0, LV_PART_MAIN);
   lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
 
-  // Плавный переход цвета при смене состояния. Резкий скачок читается
-  // как мигание и заставляет глаз возвращаться к карточке.
   static lv_style_transition_dsc_t tr;
   static const lv_style_prop_t tr_props[] = {LV_STYLE_BG_COLOR, LV_STYLE_BG_OPA, LV_STYLE_PROP_INV};
   lv_style_transition_dsc_init(&tr, tr_props, lv_anim_path_ease_out, 260, 0, nullptr);
   lv_obj_set_style_transition(box, &tr, LV_PART_MAIN);
 
-  // Заливка по уровню: у света ширина полосы показывает яркость прямо
-  // на карточке, как в Bubble Card. Лежит под содержимым.
   lv_obj_t *fill = lv_obj_create(box);
   lv_obj_remove_style_all(fill);
   lv_obj_set_pos(fill, 0, 0);
@@ -611,16 +682,15 @@ void PanelUI::render_card_(void *parent, Card *card, int x, int y, int w, int h)
   lv_obj_set_style_bg_opa(fill, LV_OPA_30, LV_PART_MAIN);
   lv_obj_add_flag(fill, LV_OBJ_FLAG_HIDDEN);
 
-  // Круг с символом слева.
-  const int d = std::min(h - 24, 72);
+  // Иконка в круге, чуть светлее самой карточки — как в образце.
+  const int d = std::min(h - 18, 68);
   lv_obj_t *ibox = lv_obj_create(box);
   lv_obj_remove_style_all(ibox);
   lv_obj_set_size(ibox, d, d);
-  lv_obj_align(ibox, LV_ALIGN_LEFT_MID, 14, 0);
+  lv_obj_align(ibox, LV_ALIGN_LEFT_MID, 9, 0);
   lv_obj_set_style_radius(ibox, d / 2, LV_PART_MAIN);
   lv_obj_set_style_bg_color(ibox, accent, LV_PART_MAIN);
   lv_obj_set_style_bg_opa(ibox, LV_OPA_20, LV_PART_MAIN);
-
   lv_obj_add_flag(ibox, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_add_event_cb(ibox, icon_event_cb, LV_EVENT_CLICKED, card);
 
@@ -631,33 +701,43 @@ void PanelUI::render_card_(void *parent, Card *card, int x, int y, int w, int h)
   if (this->font_icon_ != nullptr)
     lv_obj_set_style_text_font(icon, static_cast<const lv_font_t *>(this->font_icon_), LV_PART_MAIN);
 
-  const int tx = 14 + d + 14;
+  // Ширина, занятая органами управления справа. Текст не должен под них
+  // залезать, иначе имя обрывается на полуслове.
+  int ctl_w = 0;
+  if (card->type == "climate")
+    ctl_w = 232;
+  else if (card->type == "cover")
+    ctl_w = 268;
+  else if (card->type == "fan")
+    ctl_w = 210;
+  else if (card->type == "light")
+    ctl_w = 96;
+
+  const int tx = 10 + d + 14;
+  const int text_w = w - tx - ctl_w - 14;
 
   lv_obj_t *name = lv_label_create(box);
   lv_label_set_text(name, card->label.c_str());
   lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
-  lv_obj_set_width(name, w - tx - 14);
-  lv_obj_align(name, LV_ALIGN_LEFT_MID, tx, -14);
-  lv_obj_set_style_text_color(name, lv_color_hex(card_ink2()), LV_PART_MAIN);
-  if (this->font_small_ != nullptr)
-    lv_obj_set_style_text_font(name, static_cast<const lv_font_t *>(this->font_small_), LV_PART_MAIN);
+  lv_obj_set_width(name, text_w > 40 ? text_w : 40);
+  lv_obj_align(name, LV_ALIGN_LEFT_MID, tx, -13);
+  lv_obj_set_style_text_color(name, lv_color_hex(card_ink()), LV_PART_MAIN);
+  if (this->font_body_ != nullptr)
+    lv_obj_set_style_text_font(name, static_cast<const lv_font_t *>(this->font_body_), LV_PART_MAIN);
 
+  // Вторая строка — состояние. В образце оно цветное у включённого
+  // и приглушённое у выключенного: цвет несёт смысл, а не украшает.
   lv_obj_t *value = lv_label_create(box);
   lv_label_set_text(value, "—");
   lv_label_set_long_mode(value, LV_LABEL_LONG_DOT);
-  lv_obj_set_width(value, w - tx - 14);
-  lv_obj_align(value, LV_ALIGN_LEFT_MID, tx, 14);
-  lv_obj_set_style_text_color(value, lv_color_hex(card_ink()), LV_PART_MAIN);
-  if (this->font_value_ != nullptr)
-    lv_obj_set_style_text_font(value, static_cast<const lv_font_t *>(this->font_value_), LV_PART_MAIN);
+  lv_obj_set_width(value, text_w > 40 ? text_w : 40);
+  lv_obj_align(value, LV_ALIGN_LEFT_MID, tx, 15);
+  lv_obj_set_style_text_color(value, lv_color_hex(card_ink3()), LV_PART_MAIN);
+  if (this->font_small_ != nullptr)
+    lv_obj_set_style_text_font(value, static_cast<const lv_font_t *>(this->font_small_), LV_PART_MAIN);
 
-  // Третья строка нужна не всегда — прячем, пока нечего показать.
   lv_obj_t *sub = lv_label_create(box);
   lv_label_set_text(sub, "");
-  lv_obj_align(sub, LV_ALIGN_BOTTOM_LEFT, tx, -10);
-  lv_obj_set_style_text_color(sub, lv_color_hex(card_ink3()), LV_PART_MAIN);
-  if (this->font_small_ != nullptr)
-    lv_obj_set_style_text_font(sub, static_cast<const lv_font_t *>(this->font_small_), LV_PART_MAIN);
   lv_obj_add_flag(sub, LV_OBJ_FLAG_HIDDEN);
 
   card->box = box;
@@ -668,6 +748,9 @@ void PanelUI::render_card_(void *parent, Card *card, int x, int y, int w, int h)
   card->lbl_value = value;
   card->lbl_sub = sub;
   card->owner = this;
+
+  if (ctl_w > 0)
+    this->build_inline_controls(box, card, w, h, ctl_w);
 
   const bool controllable =
       card->type == "light" || card->type == "switch" || card->type == "valve" ||
@@ -680,13 +763,138 @@ void PanelUI::render_card_(void *parent, Card *card, int x, int y, int w, int h)
   }
 }
 
-// Цвет карточки: если лампа сообщила свой RGB и горит — берём его.
-// Иначе цвет по типу. Так карточка тёплого света выглядит тёплой,
-// а холодного — холодной, как в образце.
-static lv_color_t card_color(const PanelUI::Card *card) {
-  if (card->rgb >= 0 && card->active)
-    return lv_color_hex(static_cast<uint32_t>(card->rgb));
-  return accent_for(card->type);
+// Органы управления прямо на карточке: пилюля «− значение +» у климата,
+// проценты у вентилятора и света. Ради самого частого действия не надо
+// открывать подробности.
+// Пилюля «минус — значение — плюс». Ровно та же, что на карточке:
+// в Bubble Card это основной орган управления числом, и он должен
+// выглядеть и вести себя одинаково везде.
+void PanelUI::build_step_pill(void *parent_v, Card *card, int x, int y, int w, int h,
+                              const std::string &service, const std::string &key, int lo, int hi,
+                              int step_v) {
+  auto *parent = static_cast<lv_obj_t *>(parent_v);
+  const lv_color_t acc = accent_for(card->type);
+
+  lv_obj_t *pill = lv_obj_create(parent);
+  lv_obj_remove_style_all(pill);
+  lv_obj_set_size(pill, w, h);
+  lv_obj_set_pos(pill, x, y);
+  lv_obj_set_style_radius(pill, h / 2, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(pill, acc, LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(pill, LV_OPA_20, LV_PART_MAIN);
+
+  lv_obj_t *val = lv_label_create(pill);
+  lv_label_set_text(val, "—");
+  lv_obj_center(val);
+  lv_obj_set_style_text_color(val, lv_color_hex(card_ink()), LV_PART_MAIN);
+  if (this->font_title_ != nullptr)
+    lv_obj_set_style_text_font(val, static_cast<const lv_font_t *>(this->font_title_), LV_PART_MAIN);
+
+  for (int plus = 0; plus < 2; plus++) {
+    lv_obj_t *b = lv_button_create(pill);
+    lv_obj_remove_style_all(b);
+    lv_obj_set_size(b, h, h);
+    lv_obj_align(b, plus ? LV_ALIGN_RIGHT_MID : LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_t *l = lv_label_create(b);
+    lv_label_set_text(l, plus ? "+" : "−");
+    lv_obj_center(l);
+    lv_obj_set_style_text_color(l, lv_color_hex(card_ink()), LV_PART_MAIN);
+    if (this->font_title_ != nullptr)
+      lv_obj_set_style_text_font(l, static_cast<const lv_font_t *>(this->font_title_), LV_PART_MAIN);
+    auto *a = new SheetAction{this, service, key, plus ? "+" : "-"};  // NOLINT
+    a->card = card;
+    a->label_obj = val;
+    a->lo = lo;
+    a->hi = hi;
+    a->step = step_v;
+    lv_obj_add_event_cb(b, step_pill_cb, LV_EVENT_CLICKED, a);
+    lv_obj_add_event_cb(b, sheet_action_free_cb, LV_EVENT_DELETE, a);
+  }
+
+  // Первое значение — из живого состояния, а не выдуманное.
+  char b0[16];
+  if (key == "temperature")
+    snprintf(b0, sizeof(b0), "%.1f°", !std::isnan(card->target_temp) ? card->target_temp : 22.0f);
+  else if (key == "brightness_pct")
+    snprintf(b0, sizeof(b0), "%d %%", card->level > 0 ? card->level : 50);
+  else if (key == "percentage")
+    snprintf(b0, sizeof(b0), "%d %%", card->fan_pct >= 0 ? card->fan_pct : 50);
+  else
+    snprintf(b0, sizeof(b0), "%d", lo);
+  lv_label_set_text(val, b0);
+}
+
+void PanelUI::build_inline_controls(void *box_v, Card *card, int w, int h, int ctl_w) {
+  auto *box = static_cast<lv_obj_t *>(box_v);
+  const lv_color_t acc = accent_for(card->type);
+
+  if (card->type == "climate") {
+    // Та же пилюля, что в подробностях: один орган управления, одно
+    // поведение. Разные реализации в двух местах расходятся уже через
+    // неделю правок.
+    this->build_step_pill(box, card, w - ctl_w - 10, (h - (h - 22)) / 2, ctl_w, h - 22,
+                          "climate.set_temperature", "temperature", 5, 35, 1);
+    // Значение пилюли обновляется само при получении уставки из HA.
+    card->ctl_value = nullptr;
+
+  } else if (card->type == "fan" || card->type == "cover") {
+    // Ряд круглых кнопок и значение справа — как в образце. Кнопка,
+    // отражающая текущее состояние, обводится цветным кольцом.
+    const int bd = std::min(h - 26, 56);
+    const char *icons[3];
+    const char *svc[3];
+    int n = 0;
+    if (card->type == "fan") {
+      icons[0] = icon_by_name("fan");   svc[0] = "fan.turn_on";
+      icons[1] = icon_by_name("power"); svc[1] = "fan.turn_off";
+      n = 2;
+    } else {
+      icons[0] = icon_by_name("window-shutter"); svc[0] = "cover.open_cover";
+      icons[1] = icon_by_name("pause");          svc[1] = "cover.stop_cover";
+      icons[2] = icon_by_name("blinds");         svc[2] = "cover.close_cover";
+      n = 3;
+    }
+
+    lv_obj_t *pct = lv_label_create(box);
+    lv_label_set_text(pct, "");
+    lv_obj_align(pct, LV_ALIGN_RIGHT_MID, -16, 0);
+    lv_obj_set_style_text_color(pct, lv_color_hex(card_ink()), LV_PART_MAIN);
+    if (this->font_body_ != nullptr)
+      lv_obj_set_style_text_font(pct, static_cast<const lv_font_t *>(this->font_body_), LV_PART_MAIN);
+    card->ctl_value = pct;
+
+    for (int i = 0; i < n; i++) {
+      lv_obj_t *b = lv_button_create(box);
+      lv_obj_remove_style_all(b);
+      lv_obj_set_size(b, bd, bd);
+      lv_obj_align(b, LV_ALIGN_RIGHT_MID, -(78 + (n - 1 - i) * (bd + 8)), 0);
+      lv_obj_set_style_radius(b, bd / 2, LV_PART_MAIN);
+      lv_obj_set_style_bg_color(b, acc, LV_PART_MAIN);
+      lv_obj_set_style_bg_opa(b, LV_OPA_20, LV_PART_MAIN);
+      lv_obj_t *l = lv_label_create(b);
+      lv_label_set_text(l, icons[i] != nullptr ? icons[i] : "");
+      lv_obj_center(l);
+      lv_obj_set_style_text_color(l, acc, LV_PART_MAIN);
+      if (this->font_icon_ != nullptr)
+        lv_obj_set_style_text_font(l, static_cast<const lv_font_t *>(this->font_icon_), LV_PART_MAIN);
+      auto *a = new SheetAction{this, svc[i], "", ""};  // NOLINT
+      a->card = card;
+      a->value = card->entity;
+      lv_obj_add_event_cb(b, buttons_row_cb, LV_EVENT_CLICKED, a);
+      lv_obj_add_event_cb(b, sheet_action_free_cb, LV_EVENT_DELETE, a);
+    }
+
+  } else if (card->type == "light") {
+    // У света справа только процент яркости: управление — касанием
+    // карточки и ползунком в подробностях.
+    lv_obj_t *pct = lv_label_create(box);
+    lv_label_set_text(pct, "");
+    lv_obj_align(pct, LV_ALIGN_RIGHT_MID, -18, 0);
+    lv_obj_set_style_text_color(pct, acc, LV_PART_MAIN);
+    if (this->font_body_ != nullptr)
+      lv_obj_set_style_text_font(pct, static_cast<const lv_font_t *>(this->font_body_), LV_PART_MAIN);
+    card->ctl_value = pct;
+  }
 }
 
 void PanelUI::refresh_cameras() {
@@ -702,10 +910,8 @@ void PanelUI::refresh_cameras() {
 
 void PanelUI::refresh_card_colors(Card *card) {
   const lv_color_t c = card_color(card);
-  if (card->icon_box != nullptr) {
-    auto *ib = static_cast<lv_obj_t *>(card->icon_box);
-    lv_obj_set_style_bg_color(ib, c, LV_PART_MAIN);
-  }
+  if (card->icon_box != nullptr)
+    lv_obj_set_style_bg_color(static_cast<lv_obj_t *>(card->icon_box), c, LV_PART_MAIN);
   if (card->icon != nullptr && !card->active)
     lv_obj_set_style_text_color(static_cast<lv_obj_t *>(card->icon), c, LV_PART_MAIN);
   if (card->fill != nullptr)
@@ -791,6 +997,30 @@ void PanelUI::apply_state_(Card *card, const std::string &state) {
   }
   lv_label_set_text(value, shown.c_str());
 
+  // Значение в органах управления на карточке.
+  if (card->ctl_value != nullptr) {
+    auto *cv = static_cast<lv_obj_t *>(card->ctl_value);
+    char b2[24] = "";
+    if (card->type == "climate" && !std::isnan(card->target_temp))
+      snprintf(b2, sizeof(b2), "%.1f°", card->target_temp);
+    else if (card->type == "light" && card->level >= 0 && card->active)
+      snprintf(b2, sizeof(b2), "%d %%", card->level);
+    else if (card->type == "fan" && card->fan_pct >= 0)
+      snprintf(b2, sizeof(b2), "%d %%", card->fan_pct);
+    else if (card->type == "cover" && card->position >= 0)
+      snprintf(b2, sizeof(b2), "%d %%", card->position);
+    lv_label_set_text(cv, b2);
+  }
+
+  // Состояние второй строкой: у включённого цветное, у выключенного
+  // приглушённое. Цвет несёт смысл, а не украшает.
+  {
+    const bool on = (state == "on" || state == "open" || state == "heat" || state == "cool" ||
+                     state == "playing" || state == "unlocked" || state == "drying");
+    lv_obj_set_style_text_color(value, on ? card_color(card) : lv_color_hex(card_ink3()),
+                                LV_PART_MAIN);
+  }
+
   // Включённое подсвечивается целиком: сам пузырь, круг и символ.
   // Состояние должно читаться с двух метров, а не по мелкой надписи.
   if (box != nullptr) {
@@ -816,8 +1046,8 @@ void PanelUI::apply_state_(Card *card, const std::string &state) {
   if (numeric) {
     const bool warn = (!std::isnan(card->warn_above) && num > card->warn_above) ||
                       (!std::isnan(card->warn_below) && num < card->warn_below);
-    lv_obj_set_style_text_color(value, warn ? lv_color_hex(0xC24038) : lv_color_hex(card_ink()),
-                                LV_PART_MAIN);
+    if (warn)
+      lv_obj_set_style_text_color(value, lv_color_hex(0xC24038), LV_PART_MAIN);
   }
 }
 
@@ -1211,8 +1441,17 @@ void PanelUI::bind_entities() {
             std::string t(v.c_str(), v.size());
             card->current_temp = strtof(t.c_str(), nullptr);
             if (card->lbl_sub == nullptr) return;
-            lv_label_set_text(static_cast<lv_obj_t *>(card->lbl_sub), ("сейчас " + t + "°").c_str());
-            lv_obj_remove_flag(static_cast<lv_obj_t *>(card->lbl_sub), LV_OBJ_FLAG_HIDDEN);
+            // Вторая строка карточки: режим и текущая температура рядом,
+            // как в образце — «Eco · 52°». Одна строка вместо двух.
+            if (card->lbl_value != nullptr) {
+              const char *mode = lv_label_get_text(static_cast<lv_obj_t *>(card->lbl_value));
+              std::string cur(mode ? mode : "");
+              const size_t dot = cur.find(" · ");
+              if (dot != std::string::npos)
+                cur = cur.substr(0, dot);
+              lv_label_set_text(static_cast<lv_obj_t *>(card->lbl_value),
+                                (cur + " · " + t + "°").c_str());
+            }
           }));
       n++;
       api::global_api_server->subscribe_home_assistant_state(
@@ -1252,6 +1491,25 @@ void PanelUI::bind_entities() {
   ESP_LOGI(TAG, "подписок оформлено: %u. Состояния придут после переподключения к API", (unsigned) n);
 #else
   ESP_LOGW(TAG, "API выключен — привязка невозможна");
+#endif
+}
+
+void PanelUI::call_service_for_with(const std::string &entity, const std::string &service,
+                                   const std::string &key, const std::string &value) {
+#ifdef USE_API
+  api::HomeassistantActionRequest req;
+  req.service = StringRef(service);
+  req.data.init(2);
+  api::HomeassistantServiceMap kv;
+  kv.key = StringRef("entity_id");
+  kv.value = StringRef(entity);
+  req.data.push_back(kv);
+  api::HomeassistantServiceMap kv2;
+  kv2.key = StringRef(key);
+  kv2.value = StringRef(value);
+  req.data.push_back(kv2);
+  ESP_LOGI(TAG, "действие: %s %s %s=%s", service.c_str(), entity.c_str(), key.c_str(), value.c_str());
+  api::global_api_server->send_homeassistant_action(req);
 #endif
 }
 
@@ -1499,24 +1757,28 @@ void PanelUI::build_details_controls(void *sheet_v, Card *card, int width) {
            "cover.set_cover_position", "position");
 
   } else if (card->type == "climate") {
-    // Показываем и уставку, и текущую: без этого непонятно, что вообще
-    // происходит — греет ли и до чего.
-    {
-      char cap[64];
-      if (!std::isnan(card->current_temp))
-        snprintf(cap, sizeof(cap), "Уставка, °C   ·   сейчас %.1f°", card->current_temp);
-      else
-        snprintf(cap, sizeof(cap), "Уставка, °C");
-      caption(cap, Y0);
+    // Bubble Card не использует круговых циферблатов: там та же пилюля
+    // «минус — значение — плюс», только крупнее. Держимся образца.
+    caption(!std::isnan(card->current_temp) ? "Уставка   ·   сейчас " : "Уставка", Y0);
+    if (!std::isnan(card->current_temp)) {
+      char cb2[32];
+      snprintf(cb2, sizeof(cb2), "%.1f°", card->current_temp);
+      lv_obj_t *cur2 = lv_label_create(sheet);
+      lv_label_set_text(cur2, cb2);
+      lv_obj_set_pos(cur2, 200, Y0);
+      lv_obj_set_style_text_color(cur2, acc, LV_PART_MAIN);
+      if (this->font_small_ != nullptr)
+        lv_obj_set_style_text_font(cur2, static_cast<const lv_font_t *>(this->font_small_),
+                                   LV_PART_MAIN);
     }
-    slider(Y0 + 34, 5, 35,
-           !std::isnan(card->target_temp) ? static_cast<int>(card->target_temp + 0.5f) : 22,
-           "climate.set_temperature", "temperature");
-    caption("Режим", Y0 + 104);
-    row(Y0 + 138, {{"Нагрев", {"climate.set_hvac_mode", "hvac_mode", "heat"}},
+    this->build_step_pill(sheet, card, 0, Y0 + 34, width, 96, "climate.set_temperature",
+                          "temperature", 5, 35, 1);
+
+    caption("Режим", Y0 + 150);
+    row(Y0 + 184, {{"Нагрев", {"climate.set_hvac_mode", "hvac_mode", "heat"}},
                    {"Холод", {"climate.set_hvac_mode", "hvac_mode", "cool"}},
-                   {"Авто", {"climate.set_hvac_mode", "hvac_mode", "auto"}}});
-    row(Y0 + 138 + BH + 16, {{"Выключить", {"climate.set_hvac_mode", "hvac_mode", "off"}}});
+                   {"Авто", {"climate.set_hvac_mode", "hvac_mode", "auto"}},
+                   {"Выкл", {"climate.set_hvac_mode", "hvac_mode", "off"}}});
 
   } else if (card->type == "media") {
     row(Y0, {{"Назад", {"media_player.media_previous_track", "", ""}},
