@@ -31,10 +31,11 @@ class PanelUI : public Component {
 
   /// Шрифты для карточек. Принимаем lv_font_t* как void*, чтобы заголовок
   /// не тянул lvgl.h. Из YAML: id(f_title)->get_lv_font() и т.д.
-  void set_fonts(const void *title, const void *value, const void *small) {
+  void set_fonts(const void *title, const void *value, const void *small, const void *icon = nullptr) {
     this->font_title_ = title;
     this->font_value_ = value;
     this->font_small_ = small;
+    this->font_icon_ = icon;
   }
 
   // --- Настройки панели -------------------------------------------------
@@ -46,6 +47,11 @@ class PanelUI : public Component {
   std::string read_settings();
   bool write_settings(const std::string &data);
   void load_settings();
+
+  /// Растёт при каждом сохранении настроек. По нему прошивка понимает,
+  /// что настройки изменились, и применяет их — сами по себе они только
+  /// лежат в файле.
+  uint32_t settings_revision() const { return this->settings_rev_; }
 
   int  brightness() const { return this->s_brightness_; }
   int  sleep_brightness() const { return this->s_sleep_brightness_; }
@@ -92,6 +98,8 @@ class PanelUI : public Component {
     std::string label;
     std::string unit;
     int decimals{1};
+    int span_w{1};
+    int span_h{1};
     float deadband{0.0f};       // не перерисовывать при меньшем изменении
     uint32_t throttle_ms{1000}; // и не чаще, чем раз в столько
     float warn_above{NAN};
@@ -101,6 +109,11 @@ class PanelUI : public Component {
     void *lbl_name{nullptr};   // lv_obj_t *
     void *lbl_value{nullptr};  // lv_obj_t *
     void *lbl_sub{nullptr};    // lv_obj_t * — вторая строка: уставка, режим
+    void *icon{nullptr};       // lv_obj_t * — символ в круге
+    void *icon_box{nullptr};   // lv_obj_t * — сам круг
+    void *fill{nullptr};       // lv_obj_t * — заливка по яркости
+    int   level{-1};           // 0..100, -1 если неизвестно
+    bool  active{false};
     PanelUI *owner{nullptr};
 
     // Состояние подавления дребезга
@@ -131,6 +144,7 @@ class PanelUI : public Component {
   void render_page_(void *tile, const void *page_json, int w, int h);
   void render_card_(void *parent, Card *card, int x, int y, int w, int h);
   void update_card_value_(Card *card, const std::string &state);
+  void update_card_level_(Card *card, int level);
   void apply_state_(Card *card, const std::string &state);
   void start_http_();
 
@@ -152,10 +166,12 @@ class PanelUI : public Component {
   const void *font_title_{nullptr};
   const void *font_value_{nullptr};
   const void *font_small_{nullptr};
+  const void *font_icon_{nullptr};
   void *root_{nullptr};   // lv_obj_t *
   void *httpd_{nullptr};  // httpd_handle_t
   bool mounted_{false};
   bool http_started_{false};
+  uint32_t settings_rev_{0};
 
   // Разобранные настройки
   int s_brightness_{80};

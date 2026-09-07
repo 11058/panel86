@@ -211,6 +211,7 @@ bool PanelUI::write_settings(const std::string &data) {
   if (rename(tmp.c_str(), path.c_str()) != 0)
     return false;
   ESP_LOGI(TAG, "Настройки сохранены: %u байт", (unsigned) data.size());
+  this->settings_rev_++;
   this->load_settings();
   return true;
 }
@@ -288,6 +289,15 @@ bool PanelUI::set_setting(const std::string &group, const std::string &key, cons
 // остаются нейтральными — так на экране видно, что можно трогать.
 static uint32_t g_accent = 0xC2610C;
 
+// Цвета карточек зависят от выбранной схемы. Зашивать их нельзя:
+// на светлой схеме тёмная карточка со светлым текстом нечитаема.
+static bool g_dark = true;
+static uint32_t card_bg()      { return g_dark ? 0x161C22 : 0xFFFFFF; }
+static uint32_t card_bg_page() { return g_dark ? 0x0B0F13 : 0xF2F4F6; }
+static uint32_t card_ink()     { return g_dark ? 0xE3E9EE : 0x141C24; }
+static uint32_t card_ink2()    { return g_dark ? 0x9AA8B4 : 0x4E5D6B; }
+static uint32_t card_ink3()    { return g_dark ? 0x6B7B88 : 0x7C8B99; }
+
 static lv_color_t accent_for(const std::string &type) {
   if (type == "light" || type == "switch" || type == "scene" || type == "script")
     return lv_color_hex(g_accent);
@@ -309,82 +319,152 @@ static void card_event_cb(lv_event_t *e) {
     card->owner->on_card_tapped(card);
 }
 
+// Символ для карточки. Берём встроенные символы LVGL, чтобы не тащить
+// в прошивку отдельный шрифт иконок: своих глифов у кириллических шрифтов
+// нет, а montserrat символы содержит.
+static const char *icon_for(const std::string &type) {
+  if (type == "light")        return LV_SYMBOL_CHARGE;
+  if (type == "switch")       return LV_SYMBOL_POWER;
+  if (type == "climate")      return LV_SYMBOL_WARNING;
+  if (type == "valve")        return LV_SYMBOL_REFRESH;
+  if (type == "cover")        return LV_SYMBOL_DOWNLOAD;
+  if (type == "media")        return LV_SYMBOL_PLAY;
+  if (type == "camera")       return LV_SYMBOL_IMAGE;
+  if (type == "lock")         return LV_SYMBOL_CLOSE;
+  if (type == "scene" ||
+      type == "script")       return LV_SYMBOL_OK;
+  if (type == "sensor")       return LV_SYMBOL_LIST;
+  return LV_SYMBOL_DUMMY;
+}
+
 void PanelUI::render_card_(void *parent, Card *card, int x, int y, int w, int h) {
   auto *par = static_cast<lv_obj_t *>(parent);
   const lv_color_t accent = accent_for(card->type);
 
+  // «Пузырь»: сильное скругление, без рамки, мягкий фон. Форма и есть
+  // основной опознавательный признак — по ней карточка читается быстрее,
+  // чем по подписи.
   lv_obj_t *box = lv_obj_create(par);
   lv_obj_set_pos(box, x, y);
   lv_obj_set_size(box, w, h);
-  lv_obj_set_style_radius(box, this->theme_radius_, LV_PART_MAIN);
-  lv_obj_set_style_border_width(box, 2, LV_PART_MAIN);
-  lv_obj_set_style_border_color(box, accent, LV_PART_MAIN);
-  lv_obj_set_style_pad_all(box, 14, LV_PART_MAIN);
-  lv_obj_set_style_bg_color(box, lv_color_hex(0x161C22), LV_PART_MAIN);
+  const int r = std::min(h, w) / 2 > 34 ? 34 : std::min(h, w) / 2;
+  lv_obj_set_style_radius(box, r, LV_PART_MAIN);
+  lv_obj_set_style_border_width(box, 0, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(box, lv_color_hex(card_bg()), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(box, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_pad_all(box, 0, LV_PART_MAIN);
   lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
 
-  // Название — приглушённое, сверху.
+  // Заливка по уровню: у света ширина полосы показывает яркость прямо
+  // на карточке, как в Bubble Card. Лежит под содержимым.
+  lv_obj_t *fill = lv_obj_create(box);
+  lv_obj_remove_style_all(fill);
+  lv_obj_set_pos(fill, 0, 0);
+  lv_obj_set_size(fill, 0, h);
+  lv_obj_set_style_radius(fill, r, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(fill, accent, LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(fill, LV_OPA_30, LV_PART_MAIN);
+  lv_obj_add_flag(fill, LV_OBJ_FLAG_HIDDEN);
+
+  // Круг с символом слева.
+  const int d = std::min(h - 24, 72);
+  lv_obj_t *ibox = lv_obj_create(box);
+  lv_obj_remove_style_all(ibox);
+  lv_obj_set_size(ibox, d, d);
+  lv_obj_align(ibox, LV_ALIGN_LEFT_MID, 14, 0);
+  lv_obj_set_style_radius(ibox, d / 2, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(ibox, accent, LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(ibox, LV_OPA_20, LV_PART_MAIN);
+
+  lv_obj_t *icon = lv_label_create(ibox);
+  lv_label_set_text(icon, icon_for(card->type));
+  lv_obj_center(icon);
+  lv_obj_set_style_text_color(icon, accent, LV_PART_MAIN);
+  if (this->font_icon_ != nullptr)
+    lv_obj_set_style_text_font(icon, static_cast<const lv_font_t *>(this->font_icon_), LV_PART_MAIN);
+
+  const int tx = 14 + d + 14;
+
   lv_obj_t *name = lv_label_create(box);
   lv_label_set_text(name, card->label.c_str());
   lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
-  lv_obj_set_width(name, w - 32);
-  lv_obj_align(name, LV_ALIGN_TOP_LEFT, 0, 0);
-  lv_obj_set_style_text_color(name, lv_color_hex(0x9AA8B4), LV_PART_MAIN);
+  lv_obj_set_width(name, w - tx - 14);
+  lv_obj_align(name, LV_ALIGN_LEFT_MID, tx, -14);
+  lv_obj_set_style_text_color(name, lv_color_hex(card_ink2()), LV_PART_MAIN);
   if (this->font_small_ != nullptr)
     lv_obj_set_style_text_font(name, static_cast<const lv_font_t *>(this->font_small_), LV_PART_MAIN);
 
-  // Главное значение — крупное, цветное.
   lv_obj_t *value = lv_label_create(box);
   lv_label_set_text(value, "—");
-  lv_obj_align(value, LV_ALIGN_LEFT_MID, 0, 6);
-  lv_obj_set_style_text_color(value, accent, LV_PART_MAIN);
-  if (this->font_title_ != nullptr)
-    lv_obj_set_style_text_font(value, static_cast<const lv_font_t *>(this->font_title_), LV_PART_MAIN);
+  lv_label_set_long_mode(value, LV_LABEL_LONG_DOT);
+  lv_obj_set_width(value, w - tx - 14);
+  lv_obj_align(value, LV_ALIGN_LEFT_MID, tx, 14);
+  lv_obj_set_style_text_color(value, lv_color_hex(card_ink()), LV_PART_MAIN);
+  if (this->font_value_ != nullptr)
+    lv_obj_set_style_text_font(value, static_cast<const lv_font_t *>(this->font_value_), LV_PART_MAIN);
 
-  // Вторая строка: уставка у климата, единицы у датчика, режим у остальных.
+  // Третья строка нужна не всегда — прячем, пока нечего показать.
   lv_obj_t *sub = lv_label_create(box);
   lv_label_set_text(sub, "");
-  lv_obj_align(sub, LV_ALIGN_BOTTOM_LEFT, 0, 0);
-  lv_obj_set_style_text_color(sub, lv_color_hex(0x6B7B88), LV_PART_MAIN);
+  lv_obj_align(sub, LV_ALIGN_BOTTOM_LEFT, tx, -10);
+  lv_obj_set_style_text_color(sub, lv_color_hex(card_ink3()), LV_PART_MAIN);
   if (this->font_small_ != nullptr)
     lv_obj_set_style_text_font(sub, static_cast<const lv_font_t *>(this->font_small_), LV_PART_MAIN);
+  lv_obj_add_flag(sub, LV_OBJ_FLAG_HIDDEN);
 
   card->box = box;
+  card->fill = fill;
+  card->icon = icon;
+  card->icon_box = ibox;
   card->lbl_name = name;
   card->lbl_value = value;
   card->lbl_sub = sub;
   card->owner = this;
 
-  // Управляемое реагирует на касание, измеряемое — нет.
-  // Пользователь должен видеть разницу до того, как ткнёт.
   const bool controllable =
       card->type == "light" || card->type == "switch" || card->type == "valve" ||
       card->type == "cover" || card->type == "scene" || card->type == "script" || card->type == "lock";
   if (controllable) {
     lv_obj_add_flag(box, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(box, card_event_cb, LV_EVENT_CLICKED, card);
-    lv_label_set_text(sub, "нажмите, чтобы переключить");
   } else {
     lv_obj_clear_flag(box, LV_OBJ_FLAG_CLICKABLE);
-    if (!card->unit.empty())
-      lv_label_set_text(sub, card->unit.c_str());
   }
 }
 
-// Человеческое представление состояния. HA присылает строки, и «on»
-// на настенной панели читается хуже, чем «Вкл».
+void PanelUI::update_card_level_(Card *card, int level) {
+  card->level = level;
+  auto *fill = static_cast<lv_obj_t *>(card->fill);
+  auto *box = static_cast<lv_obj_t *>(card->box);
+  if (fill == nullptr || box == nullptr)
+    return;
+  if (level <= 0 || !card->active) {
+    lv_obj_add_flag(fill, LV_OBJ_FLAG_HIDDEN);
+    return;
+  }
+  const int w = lv_obj_get_width(box);
+  lv_obj_remove_flag(fill, LV_OBJ_FLAG_HIDDEN);
+  // Плавно: скачок ширины на каждом обновлении яркости выглядит дёрганым.
+  lv_obj_set_width(fill, w * level / 100);
+}
+
+// Человеческое представление состояния: «on» на настенной панели читается
+// хуже, чем «Вкл».
 static std::string humanize(const std::string &state) {
   if (state == "on")          return "Вкл";
   if (state == "off")         return "Выкл";
   if (state == "open")        return "Открыто";
   if (state == "closed")      return "Закрыто";
-  if (state == "unavailable") return "нет связи";
-  if (state == "unknown")     return "—";
+  if (state == "locked")      return "Заперто";
+  if (state == "unlocked")    return "Открыт";
+  if (state == "playing")     return "Играет";
+  if (state == "paused")      return "Пауза";
+  if (state == "idle")        return "Ожидание";
   if (state == "heat")        return "Нагрев";
   if (state == "cool")        return "Охлаждение";
-  if (state == "idle")        return "Ожидание";
   if (state == "auto")        return "Авто";
+  if (state == "unavailable") return "нет связи";
+  if (state == "unknown")     return "—";
   return state;
 }
 
@@ -396,7 +476,6 @@ void PanelUI::apply_state_(Card *card, const std::string &state) {
 
   std::string shown = humanize(state);
 
-  // Числовые типы: округляем до заданной точности и дописываем единицы.
   bool numeric = false;
   float num = NAN;
   {
@@ -413,22 +492,35 @@ void PanelUI::apply_state_(Card *card, const std::string &state) {
       shown += card->unit;
     }
   }
-
   lv_label_set_text(value, shown.c_str());
 
-  // Включённое подсвечиваем фоном: состояние должно читаться с двух метров,
-  // а не по мелкой надписи.
+  // Включённое подсвечивается целиком: сам пузырь, круг и символ.
+  // Состояние должно читаться с двух метров, а не по мелкой надписи.
   if (box != nullptr) {
-    const bool active = (state == "on" || state == "open" || state == "heat");
-    lv_obj_set_style_bg_color(box, active ? accent_for(card->type) : lv_color_hex(0x161C22), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(box, active ? LV_OPA_30 : LV_OPA_COVER, LV_PART_MAIN);
+    const bool active = (state == "on" || state == "open" || state == "heat" ||
+                         state == "cool" || state == "playing" || state == "unlocked");
+    card->active = active;
+    const lv_color_t acc = accent_for(card->type);
+    lv_obj_set_style_bg_color(box, active ? acc : lv_color_hex(card_bg()), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(box, active ? LV_OPA_20 : LV_OPA_COVER, LV_PART_MAIN);
+    if (card->icon_box != nullptr) {
+      auto *ib = static_cast<lv_obj_t *>(card->icon_box);
+      lv_obj_set_style_bg_color(ib, acc, LV_PART_MAIN);
+      lv_obj_set_style_bg_opa(ib, active ? LV_OPA_COVER : LV_OPA_20, LV_PART_MAIN);
+    }
+    if (card->icon != nullptr) {
+      lv_obj_set_style_text_color(static_cast<lv_obj_t *>(card->icon),
+                                  active ? lv_color_hex(card_bg_page()) : acc, LV_PART_MAIN);
+    }
+    this->update_card_level_(card, card->level);
   }
 
   // Пороги: выход за границу окрашивает значение тревожным цветом.
   if (numeric) {
-    bool warn = (!std::isnan(card->warn_above) && num > card->warn_above) ||
-                (!std::isnan(card->warn_below) && num < card->warn_below);
-    lv_obj_set_style_text_color(value, warn ? lv_color_hex(0xA32217) : accent_for(card->type), LV_PART_MAIN);
+    const bool warn = (!std::isnan(card->warn_above) && num > card->warn_above) ||
+                      (!std::isnan(card->warn_below) && num < card->warn_below);
+    lv_obj_set_style_text_color(value, warn ? lv_color_hex(0xC24038) : lv_color_hex(card_ink()),
+                                LV_PART_MAIN);
   }
 }
 
@@ -518,7 +610,7 @@ void PanelUI::render_page_(void *tile, const void *page_json, int w, int h) {
     lv_obj_t *hdr = lv_label_create(par);
     lv_label_set_text(hdr, title);
     lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, 8);
-    lv_obj_set_style_text_color(hdr, lv_color_hex(0xE3E9EE), LV_PART_MAIN);
+    lv_obj_set_style_text_color(hdr, lv_color_hex(card_ink()), LV_PART_MAIN);
     if (this->font_title_ != nullptr)
       lv_obj_set_style_text_font(hdr, static_cast<const lv_font_t *>(this->font_title_), LV_PART_MAIN);
   }
@@ -527,12 +619,22 @@ void PanelUI::render_page_(void *tile, const void *page_json, int w, int h) {
   const int cw = (w - 2 * pad - (cols - 1) * gap) / cols;
   const int ch = (h - top - pad - (rows - 1) * gap) / rows;
 
-  int idx = 0;
+  // Карта занятости: карточка может занимать несколько клеток, поэтому
+  // класть их подряд по индексу уже нельзя — ищем первое место, куда
+  // помещается. Порядок в раскладке сохраняется, дырки заполняются
+  // следующими карточками, если те мельче.
+  std::vector<bool> busy(static_cast<size_t>(cols) * rows, false);
+  auto fits = [&](int cx, int cy, int w, int h) {
+    if (cx + w > cols || cy + h > rows)
+      return false;
+    for (int y = cy; y < cy + h; y++)
+      for (int x = cx; x < cx + w; x++)
+        if (busy[static_cast<size_t>(y) * cols + x])
+          return false;
+    return true;
+  };
+
   for (JsonObject jc : page["cards"].as<JsonArray>()) {
-    if (idx >= cols * rows) {
-      ESP_LOGW(TAG, "на странице '%s' карточек больше, чем клеток %dx%d — лишние пропущены", title, cols, rows);
-      break;
-    }
     auto *card = new Card();  // NOLINT
     card->type = jc["type"] | "";
     card->entity = jc["entity"] | "";
@@ -541,16 +643,42 @@ void PanelUI::render_page_(void *tile, const void *page_json, int w, int h) {
     card->decimals = jc["decimals"] | 1;
     if (card->label.empty())
       card->label = card->entity.empty() ? card->type : card->entity;
+    JsonArray sp = jc["span"].as<JsonArray>();
+    if (!sp.isNull() && sp.size() == 2) {
+      card->span_w = sp[0].as<int>();
+      card->span_h = sp[1].as<int>();
+    }
+    if (card->span_w < 1) card->span_w = 1;
+    if (card->span_h < 1) card->span_h = 1;
+    if (card->span_w > cols) card->span_w = cols;
+    if (card->span_h > rows) card->span_h = rows;
+
     card->deadband = jc["deadband"] | this->def_deadband_;
     card->throttle_ms = parse_ms(jc["throttle"] | this->def_throttle_.c_str());
     card->warn_above = jc["warn_above"] | NAN;
     card->warn_below = jc["warn_below"] | NAN;
 
-    const int cx = pad + (idx % cols) * (cw + gap);
-    const int cy = top + (idx / cols) * (ch + gap);
-    this->render_card_(par, card, cx, cy, cw, ch);
+    int gx = -1, gy = -1;
+    for (int y = 0; y < rows && gy < 0; y++)
+      for (int x = 0; x < cols; x++)
+        if (fits(x, y, card->span_w, card->span_h)) { gx = x; gy = y; break; }
+
+    if (gx < 0) {
+      ESP_LOGW(TAG, "на странице '%s' не поместилась карточка '%s' (%dx%d клеток)", title,
+               card->label.c_str(), card->span_w, card->span_h);
+      delete card;
+      continue;
+    }
+    for (int y = gy; y < gy + card->span_h; y++)
+      for (int x = gx; x < gx + card->span_w; x++)
+        busy[static_cast<size_t>(y) * cols + x] = true;
+
+    const int px = pad + gx * (cw + gap);
+    const int py = top + gy * (ch + gap);
+    const int pw = card->span_w * cw + (card->span_w - 1) * gap;
+    const int ph = card->span_h * ch + (card->span_h - 1) * gap;
+    this->render_card_(par, card, px, py, pw, ph);
     this->cards_.push_back(card);
-    idx++;
   }
 }
 
@@ -589,7 +717,8 @@ bool PanelUI::build_ui(void *root) {
   ESP_LOGI(TAG, "рисую в области %dx%d", rw, rh);
 
   // Свой фон: у lv_obj по умолчанию светлая заливка, и на ней ничего не видно.
-  lv_obj_set_style_bg_color(par, lv_color_hex(0x0B0F13), LV_PART_MAIN);
+  g_dark = this->s_theme_ != "light";
+  lv_obj_set_style_bg_color(par, lv_color_hex(card_bg_page()), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(par, LV_OPA_COVER, LV_PART_MAIN);
 
   size_t n_pages = 0;
@@ -618,7 +747,7 @@ bool PanelUI::build_ui(void *root) {
     // Здесь достаточно обычного lv_obj, который уже есть всегда.
     lv_obj_t *scroller = lv_obj_create(par);
     lv_obj_set_size(scroller, rw, rh);
-    lv_obj_set_style_bg_color(scroller, lv_color_hex(0x0B0F13), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(scroller, lv_color_hex(card_bg_page()), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(scroller, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(scroller, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(scroller, 0, LV_PART_MAIN);
@@ -634,7 +763,7 @@ bool PanelUI::build_ui(void *root) {
       lv_obj_set_size(tile, rw, rh);
       // Абсолютное позиционирование: LV_USE_FLEX в сборке ESPHome выключен.
       lv_obj_set_pos(tile, (int) n_pages * rw, 0);
-      lv_obj_set_style_bg_color(tile, lv_color_hex(0x0B0F13), LV_PART_MAIN);
+      lv_obj_set_style_bg_color(tile, lv_color_hex(card_bg_page()), LV_PART_MAIN);
       lv_obj_set_style_bg_opa(tile, LV_OPA_COVER, LV_PART_MAIN);
       lv_obj_set_style_border_width(tile, 0, LV_PART_MAIN);
       lv_obj_set_style_pad_all(tile, 0, LV_PART_MAIN);
@@ -689,6 +818,30 @@ void PanelUI::bind_entities() {
           this->update_card_value_(card, std::string(state.c_str(), state.size()));
         }));
     n++;
+
+    // Яркость света — отдельной подпиской на атрибут. Именно она даёт
+    // заливку карточки, как в Bubble Card.
+    if (card->type == "light") {
+      api::global_api_server->subscribe_home_assistant_state(
+          card->entity, optional<std::string>("brightness"),
+          std::function<void(StringRef)>([this, card](StringRef v) {
+            const int raw = atoi(std::string(v.c_str(), v.size()).c_str());
+            this->update_card_level_(card, raw > 0 ? (raw * 100 + 127) / 255 : 0);
+          }));
+      n++;
+    }
+    // У климата на карточке полезнее текущая температура, чем режим.
+    if (card->type == "climate") {
+      api::global_api_server->subscribe_home_assistant_state(
+          card->entity, optional<std::string>("current_temperature"),
+          std::function<void(StringRef)>([this, card](StringRef v) {
+            if (card->lbl_sub == nullptr) return;
+            std::string t(v.c_str(), v.size());
+            lv_label_set_text(static_cast<lv_obj_t *>(card->lbl_sub), ("сейчас " + t + "°").c_str());
+            lv_obj_remove_flag(static_cast<lv_obj_t *>(card->lbl_sub), LV_OBJ_FLAG_HIDDEN);
+          }));
+      n++;
+    }
   }
   ESP_LOGI(TAG, "подписок оформлено: %u. Состояния придут после переподключения к API", (unsigned) n);
 #else

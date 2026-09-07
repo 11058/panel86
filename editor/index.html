@@ -54,17 +54,22 @@
     position:absolute; top:6px; left:0; right:0; text-align:center;
     font-size:21px; font-weight:600;
   }
+  /* Пузырь: скругление, иконка в круге слева, две строки текста.
+     Повторяет то, что рисует прошивка. */
   .card{
-    position:absolute; border-radius:14px; border:2px solid var(--ink-3);
-    padding:10px; cursor:pointer; overflow:hidden; transition:transform .08s;
+    position:absolute; border-radius:24px; border:none; overflow:hidden;
+    cursor:pointer; transition:transform .08s; background:#161c22;
   }
   .card:hover{transform:translateY(-1px)}
   .card.sel{outline:2px solid var(--accent); outline-offset:2px}
-  .card .n{font-size:12px; color:var(--ink-2); white-space:nowrap; overflow:hidden;
-           text-overflow:ellipsis}
-  .card .v{font-size:21px; font-weight:600; position:absolute; left:10px; top:50%;
-           transform:translateY(-35%)}
-  .card .s{font-size:11px; color:var(--ink-3); position:absolute; left:10px; bottom:8px}
+  .card .ic{position:absolute; left:10px; top:50%; transform:translateY(-50%);
+            border-radius:50%; display:flex; align-items:center; justify-content:center;
+            font-size:15px}
+  .card .n{position:absolute; font-size:11px; color:var(--ink-2); white-space:nowrap;
+           overflow:hidden; text-overflow:ellipsis}
+  .card .v{position:absolute; font-size:15px; font-weight:600; white-space:nowrap;
+           overflow:hidden; text-overflow:ellipsis}
+  .card .fl{position:absolute; left:0; top:0; bottom:0; border-radius:24px; opacity:.3}
   .card.empty{border-style:dashed; border-color:var(--rule); cursor:pointer}
   .card.empty .n{color:var(--ink-3); text-align:center; margin-top:28%}
 
@@ -227,7 +232,7 @@
     <div class="row">
       <input id="pCols" type="number" min="1" max="4">
       <span style="color:var(--ink-3)">×</span>
-      <input id="pRows" type="number" min="1" max="4">
+      <input id="pRows" type="number" min="1" max="6">
     </div>
     <p class="hint">На 720 × 720 больше 2 × 4 нечитаемо пальцем.</p>
 
@@ -269,6 +274,51 @@
       <p class="hint" id="cEntName"></p>
       <label>Подпись</label>
       <input id="cLabel" style="width:100%" placeholder="как назвать на экране">
+      <label>Размер в клетках</label>
+      <div class="row">
+        <input id="cSpanW" type="number" min="1" max="4" title="по ширине">
+        <span style="color:var(--ink-3)">×</span>
+        <input id="cSpanH" type="number" min="1" max="6" title="по высоте">
+      </div>
+      <p class="hint">Карточка может занимать несколько клеток. Крупное —
+        то, на что смотрят издалека: климат, уровень бака, медиа.</p>
+      <label>Иконка</label>
+      <select id="cIcon" style="width:100%">
+        <option value="">по типу карточки</option>
+        <option value="bulb">лампа</option>
+        <option value="power">питание</option>
+        <option value="heat">нагрев</option>
+        <option value="water">вода</option>
+        <option value="cover">штора</option>
+        <option value="media">медиа</option>
+        <option value="camera">камера</option>
+        <option value="lock">замок</option>
+        <option value="ok">сцена</option>
+        <option value="list">датчик</option>
+      </select>
+
+      <label>Нажатие</label>
+      <select id="cTap" style="width:100%">
+        <option value="toggle">переключить</option>
+        <option value="none">ничего не делать</option>
+      </select>
+
+      <label>Показывать</label>
+      <div class="row" style="gap:14px; margin-top:2px">
+        <label style="margin:0"><input id="cShowIcon" type="checkbox"> иконку</label>
+        <label style="margin:0"><input id="cShowName" type="checkbox"> имя</label>
+        <label style="margin:0"><input id="cShowState" type="checkbox"> состояние</label>
+      </div>
+
+      <div id="lightFields">
+        <label>Заливка по яркости</label>
+        <div class="row" style="gap:14px; margin-top:2px">
+          <label style="margin:0"><input id="cFill" type="checkbox"> показывать уровень</label>
+        </div>
+        <p class="hint">Полоса на карточке показывает яркость света —
+          как в Bubble Card.</p>
+      </div>
+
       <div id="numFields">
         <label>Единицы</label>
         <input id="cUnit" style="width:100%" placeholder="°C">
@@ -279,6 +329,10 @@
           <input id="cWarnAbove" type="number" step="0.1" placeholder="выше">
           <input id="cWarnBelow" type="number" step="0.1" placeholder="ниже">
         </div>
+        <label>Не перерисовывать чаще</label>
+        <input id="cThrottle" class="mono" style="width:100%" placeholder="1s">
+        <label>Порог изменения</label>
+        <input id="cDead" type="number" step="0.1" min="0" placeholder="0.5">
       </div>
       <button id="delCard" class="danger del">Удалить карточку</button>
     </div>
@@ -369,35 +423,84 @@ function render(){
   const ch = (720 - top - pad - (rows-1)*gap) / rows;
   const radius = (doc.theme?.radius ?? 16) * S;
 
-  for (let i = 0; i < cols*rows; i++){
-    const card = page.cards[i];
-    const el = document.createElement("div");
-    const x = pad + (i % cols) * (cw + gap);
-    const y = top + Math.floor(i / cols) * (ch + gap);
-    el.style.left = (x*S)+"px"; el.style.top = (y*S)+"px";
-    el.style.width = (cw*S)+"px"; el.style.height = (ch*S)+"px";
-    el.style.borderRadius = radius+"px";
+  // Раскладка карточек повторяет прошивку: ищем первое место, куда
+  // помещается карточка заданного размера, и занимаем его.
+  const busy = new Array(cols*rows).fill(false);
+  const fits = (cx,cy,w,h) => {
+    if (cx+w > cols || cy+h > rows) return false;
+    for (let y=cy; y<cy+h; y++) for (let x=cx; x<cx+w; x++)
+      if (busy[y*cols+x]) return false;
+    return true;
+  };
+  const placed = [];
+  page.cards.forEach((card, ci) => {
+    const w = clamp(card.span?.[0] || 1, 1, cols);
+    const h = clamp(card.span?.[1] || 1, 1, rows);
+    let gx=-1, gy=-1;
+    outer: for (let y=0; y<rows; y++) for (let x=0; x<cols; x++)
+      if (fits(x,y,w,h)) { gx=x; gy=y; break outer; }
+    if (gx < 0) return;                       // не поместилась
+    for (let y=gy; y<gy+h; y++) for (let x=gx; x<gx+w; x++) busy[y*cols+x] = true;
+    placed.push({card, ci, gx, gy, w, h});
+  });
 
-    if (!card){
-      el.className = "card empty";
-      el.innerHTML = '<div class="n">+ карточка</div>';
-      el.onclick = () => { addCard(i); };
-    } else {
+  for (const p of placed){
+    const card = p.card;
+    const el = document.createElement("div");
+    const x = pad + p.gx * (cw + gap);
+    const y = top + p.gy * (ch + gap);
+    el.style.left = (x*S)+"px"; el.style.top = (y*S)+"px";
+    el.style.width  = ((p.w*cw + (p.w-1)*gap)*S)+"px";
+    el.style.height = ((p.h*ch + (p.h-1)*gap)*S)+"px";
+    el.style.borderRadius = radius+"px";
+    const i = p.ci;
+    {
       el.className = "card" + (i === cardIx ? " sel" : "");
       const acc = accentFor(card.type);
-      el.style.borderColor = acc;
       const val = demoValue(card.type, i);
       const active = ["Вкл","Открыто","Нагрев"].includes(val);
-      if (active) el.style.background = acc + "33";
       const unit = card.unit ? " " + card.unit : "";
       const shown = /^[\d.]+$/.test(val) ? val + unit : val;
-      el.innerHTML =
-        '<div class="n">' + esc(card.label || entName(card.entity) || card.entity || card.type) + '</div>' +
-        '<div class="v" style="color:'+acc+'">' + esc(shown) + '</div>' +
-        '<div class="s">' + (CONTROLLABLE.has(card.type) ? "нажмите, чтобы переключить"
-                                                         : esc(card.unit || "")) + '</div>';
+
+      const hPx = (p.h*ch + (p.h-1)*gap) * S;
+      const wPx = (p.w*cw + (p.w-1)*gap) * S;
+      const d = Math.min(hPx - 16, 50);
+      const tx = 10 + d + 10;
+
+      el.style.background = active ? acc + "33" : "#161c22";
+      el.style.borderRadius = Math.min(hPx, wPx) / 2 > 24 ? "24px" : (Math.min(hPx,wPx)/2)+"px";
+
+      let inner = "";
+      // Заливка по яркости — только у света и только если включена.
+      if (card.type === "light" && card.fill !== false && active)
+        inner += `<div class="fl" style="width:${wPx*0.6}px;background:${acc}"></div>`;
+      if (card.show_icon !== false)
+        inner += `<div class="ic" style="width:${d}px;height:${d}px;` +
+                 `background:${active ? acc : acc+"33"};color:${active ? "#0b0f13" : acc}">●</div>`;
+      if (card.show_name !== false)
+        inner += `<div class="n" style="left:${tx}px;top:50%;transform:translateY(-22px);` +
+                 `width:${wPx-tx-10}px">` +
+                 esc(card.label || entName(card.entity) || card.entity || card.type) + '</div>';
+      if (card.show_state !== false)
+        inner += `<div class="v" style="left:${tx}px;top:50%;transform:translateY(0px);` +
+                 `width:${wPx-tx-10}px;color:${active ? acc : "#e3e9ee"}">` + esc(shown) + '</div>';
+      el.innerHTML = inner;
       el.onclick = () => { cardIx = i; render(); };
     }
+    scr.append(el);
+  }
+
+  // Пустые клетки — чтобы было куда добавить карточку.
+  for (let i = 0; i < cols*rows; i++){
+    if (busy[i]) continue;
+    const el = document.createElement("div");
+    el.className = "card empty";
+    el.style.left = (pad + (i%cols)*(cw+gap))*S+"px";
+    el.style.top  = (top + Math.floor(i/cols)*(ch+gap))*S+"px";
+    el.style.width = (cw*S)+"px"; el.style.height = (ch*S)+"px";
+    el.style.borderRadius = radius+"px";
+    el.innerHTML = '<div class="n">+ карточка</div>';
+    el.onclick = () => addCard();
     scr.append(el);
   }
 
@@ -414,9 +517,20 @@ function render(){
     $("cLabel").value  = c.label  || "";
     $("cUnit").value   = c.unit   || "";
     $("cDec").value    = c.decimals ?? 1;
+    $("cSpanW").value = c.span?.[0] ?? 1;
+    $("cSpanH").value = c.span?.[1] ?? 1;
     $("cWarnAbove").value = c.warn_above ?? "";
     $("cWarnBelow").value = c.warn_below ?? "";
+    $("cThrottle").value = c.throttle ?? "";
+    $("cDead").value = c.deadband ?? "";
+    $("cIcon").value = c.icon ?? "";
+    $("cTap").value = c.tap ?? "toggle";
+    $("cShowIcon").checked  = c.show_icon  !== false;
+    $("cShowName").checked  = c.show_name  !== false;
+    $("cShowState").checked = c.show_state !== false;
+    $("cFill").checked = c.fill !== false;
     $("numFields").style.display = NUMERIC.has(c.type) ? "block" : "none";
+    $("lightFields").style.display = c.type === "light" ? "block" : "none";
   }
 
   $("json").value = JSON.stringify(doc, null, 2);
@@ -425,11 +539,10 @@ function render(){
 const esc = s => String(s).replace(/[&<>"]/g, m =>
   ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
 
-function addCard(slot){
+function addCard(){
   const page = doc.pages[pageIx];
-  while (page.cards.length < slot) page.cards.push({type:"spacer"});
-  page.cards[slot] = {type:"sensor", entity:"", label:"", decimals:1};
-  cardIx = slot;
+  page.cards.push({type:"sensor", entity:"", label:"", decimals:1, span:[1,1]});
+  cardIx = page.cards.length - 1;
   render();
 }
 
@@ -438,7 +551,7 @@ function bind(id, fn, ev="input"){ $(id).addEventListener(ev, fn); }
 
 bind("pTitle", e => { doc.pages[pageIx].title = e.target.value; render(); });
 bind("pCols",  e => { doc.pages[pageIx].grid = [clamp(+e.target.value,1,4), doc.pages[pageIx].grid[1]]; render(); });
-bind("pRows",  e => { doc.pages[pageIx].grid = [doc.pages[pageIx].grid[0], clamp(+e.target.value,1,4)]; render(); });
+bind("pRows",  e => { doc.pages[pageIx].grid = [doc.pages[pageIx].grid[0], clamp(+e.target.value,1,6)]; render(); });
 bind("tAccent", e => { doc.theme.accent = e.target.value.toUpperCase(); render(); });
 bind("tAccentHex", e => { if(/^#[0-9a-f]{6}$/i.test(e.target.value)){ doc.theme.accent = e.target.value.toUpperCase(); render(); } });
 bind("tRadius", e => { doc.theme.radius = clamp(+e.target.value,0,48); render(); });
@@ -450,9 +563,19 @@ bind("cType",   e => { cur().type = e.target.value; render(); }, "change");
 bind("cEntity", e => { cur().entity = e.target.value.trim(); render(); });
 bind("cLabel",  e => { cur().label = e.target.value; render(); });
 bind("cUnit",   e => { cur().unit = e.target.value; render(); });
+bind("cSpanW",  e => { const c=cur(); c.span = [clamp(+e.target.value,1,4), c.span?.[1] || 1]; render(); });
+bind("cSpanH",  e => { const c=cur(); c.span = [c.span?.[0] || 1, clamp(+e.target.value,1,6)]; render(); });
 bind("cDec",    e => { cur().decimals = clamp(+e.target.value,0,3); render(); });
 bind("cWarnAbove", e => { const v=e.target.value; if(v==="") delete cur().warn_above; else cur().warn_above=+v; render(); });
 bind("cWarnBelow", e => { const v=e.target.value; if(v==="") delete cur().warn_below; else cur().warn_below=+v; render(); });
+bind("cThrottle", e => { const v=e.target.value.trim(); if(!v) delete cur().throttle; else cur().throttle=v; render(); });
+bind("cDead",     e => { const v=e.target.value; if(v==="") delete cur().deadband; else cur().deadband=+v; render(); });
+bind("cIcon",     e => { const v=e.target.value; if(!v) delete cur().icon; else cur().icon=v; render(); }, "change");
+bind("cTap",      e => { cur().tap = e.target.value; render(); }, "change");
+bind("cShowIcon",  e => { cur().show_icon  = e.target.checked; render(); }, "change");
+bind("cShowName",  e => { cur().show_name  = e.target.checked; render(); }, "change");
+bind("cShowState", e => { cur().show_state = e.target.checked; render(); }, "change");
+bind("cFill",      e => { cur().fill = e.target.checked; render(); }, "change");
 
 $("delCard").onclick = () => { doc.pages[pageIx].cards.splice(cardIx,1); cardIx=-1; render(); };
 $("addPage").onclick = () => {

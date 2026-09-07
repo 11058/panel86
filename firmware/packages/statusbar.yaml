@@ -165,3 +165,30 @@ interval:
             reported = millis();
             ESP_LOGW("net", "сервер имён затирается (вероятно, Ethernet без кабеля) — держу резервный 1.1.1.1");
           }
+
+  # Применение настроек, пришедших из веб-интерфейса.
+  #
+  # Сохранённые настройки сами по себе только лежат в файле. Раньше тему
+  # переключали кнопки на панели, а после их удаления применять изменения
+  # стало некому — правка в браузере сохранялась, но ничего не меняла.
+  # Теперь следим за ревизией: она растёт при каждой записи.
+  - interval: 1s
+    then:
+      - lambda: |-
+          static uint32_t seen = 0;
+          const uint32_t rev = id(panel_storage)->settings_revision();
+          if (rev == seen) return;
+          seen = rev;
+          ESP_LOGI("settings", "настройки изменились — применяю");
+
+          // Тема: и оформление интерфейса, и цвета карточек.
+          if (id(panel_storage)->theme() == "light") id(theme_light).execute();
+          else                                      id(theme_dark).execute();
+          id(panel_storage)->rebuild();
+
+          // Яркость применится сама следующим тиком присмотра за экраном,
+          // но лучше не заставлять человека ждать секунду после движения
+          // ползунка в браузере.
+          auto call = id(backlight).turn_on();
+          call.set_brightness(id(panel_storage)->brightness() / 100.0f);
+          call.perform();

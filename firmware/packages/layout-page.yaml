@@ -58,7 +58,7 @@ lvgl:
                     - label:
                         text: "\U0000F013"
                         align: CENTER
-                        text_font: montserrat_20
+                        text_font: montserrat_28
                   on_click:
                     # Оформление применяем при каждом входе: блок theme:
                     # не покрывает страницы, а на загрузке что-то может
