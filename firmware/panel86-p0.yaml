@@ -100,6 +100,7 @@ packages:
   spike: !include packages/spike-runtime-binding.yaml
   layout: !include packages/layout-page.yaml
   statusbar: !include packages/statusbar.yaml
+  settings: !include packages/settings-ui.yaml
 
 # Оба канала одновременно. Первый в списке — приоритетный: именно он
 # держит маршрут по умолчанию, второй остаётся горячим резервом.

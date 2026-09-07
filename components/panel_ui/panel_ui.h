@@ -37,6 +37,27 @@ class PanelUI : public Component {
     this->font_small_ = small;
   }
 
+  // --- Настройки панели -------------------------------------------------
+  // Лежат файлом рядом с раскладкой, а НЕ в globals с restore_value.
+  // Причина в ADR-0004: ключи хранения ESPHome привязаны к хешу конфига,
+  // и обновление прошивки обнуляет сохранённое. Файл переживает всё.
+
+  std::string settings_path() const;
+  std::string read_settings();
+  bool write_settings(const std::string &data);
+  void load_settings();
+
+  int  brightness() const { return this->s_brightness_; }
+  int  sleep_brightness() const { return this->s_sleep_brightness_; }
+  uint32_t sleep_after_ms() const { return this->s_sleep_after_ms_; }
+  bool wake_on_motion() const { return this->s_wake_on_motion_; }
+  const std::string &theme() const { return this->s_theme_; }
+  const std::string &time_source() const { return this->s_time_source_; }
+  const std::string &ntp_server() const { return this->s_ntp_server_; }
+
+  /// Изменить одну настройку и сразу сохранить. Значение — как в JSON.
+  bool set_setting(const std::string &group, const std::string &key, const std::string &value);
+
   /// Заполнить карточки правдоподобными значениями без Home Assistant.
   /// Нужно, чтобы проверять вёрстку и типы карточек, когда HA недоступен.
   void demo_fill();
@@ -113,6 +134,7 @@ class PanelUI : public Component {
   const char *partition_{"storage"};
   const char *base_path_{"/fs"};
   const char *layout_file_{"layout.json"};
+  const char *settings_file_{"settings.json"};
   uint16_t http_port_{8080};
   // Тема из раскладки
   uint32_t theme_accent_{0xC2610C};
@@ -128,6 +150,16 @@ class PanelUI : public Component {
   void *httpd_{nullptr};  // httpd_handle_t
   bool mounted_{false};
   bool http_started_{false};
+
+  // Разобранные настройки
+  int s_brightness_{80};
+  int s_sleep_brightness_{10};
+  uint32_t s_sleep_after_ms_{60000};
+  bool s_wake_on_motion_{true};
+  std::string s_theme_{"dark"};
+  std::string s_time_source_{"sntp"};
+  std::string s_ntp_server_{"pool.ntp.org"};
+  std::string s_timezone_{"Asia/Yekaterinburg"};
 };
 
 }  // namespace panel_ui

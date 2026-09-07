@@ -249,6 +249,9 @@ lvgl:
                         id: lbl_wifi_result
                         text: "Подключено, сохранено в памяти"
                     - delay: 2s
+                    # Интерфейс надо построить: при загрузке сети ещё не было,
+                    # интерпретатор не запускался, и контейнер пуст.
+                    - lambda: 'id(panel_storage)->rebuild();'
                     - lvgl.page.show: page_layout
                   on_error:
                     - lvgl.label.update:

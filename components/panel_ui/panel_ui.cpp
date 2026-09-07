@@ -58,6 +58,8 @@ void PanelUI::setup() {
     ESP_LOGI(TAG, "LittleFS смонтирован: %u из %u КиБ занято", (unsigned) (used / 1024), (unsigned) (total / 1024));
   }
 
+  this->load_settings();
+
   std::string layout = this->read_layout();
   if (layout.empty()) {
     ESP_LOGW(TAG, "Раскладки нет — панель не настроена");
@@ -149,6 +151,109 @@ bool PanelUI::write_layout(const std::string &data) {
   }
   ESP_LOGI(TAG, "Раскладка сохранена: %u байт", (unsigned) data.size());
   return true;
+}
+
+// ---------------------------------------------------------------------------
+// Настройки панели: файл рядом с раскладкой
+// ---------------------------------------------------------------------------
+
+std::string PanelUI::settings_path() const {
+  return std::string(this->base_path_) + "/" + this->settings_file_;
+}
+
+std::string PanelUI::read_settings() {
+  if (!this->mounted_)
+    return {};
+  FILE *f = fopen(this->settings_path().c_str(), "rb");
+  if (f == nullptr)
+    return {};
+  std::string out;
+  char buf[512];
+  size_t n;
+  while ((n = fread(buf, 1, sizeof(buf), f)) > 0)
+    out.append(buf, n);
+  fclose(f);
+  return out;
+}
+
+bool PanelUI::write_settings(const std::string &data) {
+  if (!this->mounted_)
+    return false;
+  const std::string path = this->settings_path();
+  const std::string tmp = path + ".tmp";
+  FILE *f = fopen(tmp.c_str(), "wb");
+  if (f == nullptr)
+    return false;
+  const size_t written = fwrite(data.data(), 1, data.size(), f);
+  fclose(f);
+  if (written != data.size()) {
+    remove(tmp.c_str());
+    return false;
+  }
+  remove(path.c_str());
+  if (rename(tmp.c_str(), path.c_str()) != 0)
+    return false;
+  ESP_LOGI(TAG, "Настройки сохранены: %u байт", (unsigned) data.size());
+  this->load_settings();
+  return true;
+}
+
+void PanelUI::load_settings() {
+  const std::string data = this->read_settings();
+  if (data.empty()) {
+    ESP_LOGI(TAG, "Настроек нет, беру умолчания");
+    return;
+  }
+  json::parse_json(data, [this](JsonObject doc) -> bool {
+    JsonObject d = doc["display"].as<JsonObject>();
+    if (!d.isNull()) {
+      this->s_brightness_ = d["brightness"] | 80;
+      this->s_sleep_brightness_ = d["sleep_brightness"] | 10;
+      this->s_sleep_after_ms_ = parse_ms(d["sleep_after"] | "60s");
+      this->s_wake_on_motion_ = d["wake_on_motion"] | true;
+      this->s_theme_ = std::string(d["theme"] | "dark");
+    }
+    JsonObject t = doc["time"].as<JsonObject>();
+    if (!t.isNull()) {
+      this->s_time_source_ = std::string(t["source"] | "sntp");
+      this->s_ntp_server_ = std::string(t["server"] | "pool.ntp.org");
+      this->s_timezone_ = std::string(t["timezone"] | "Asia/Yekaterinburg");
+    }
+    return true;
+  });
+  ESP_LOGI(TAG, "Настройки: яркость %d%%, засыпание %u мс, тема %s, время из %s",
+           this->s_brightness_, (unsigned) this->s_sleep_after_ms_, this->s_theme_.c_str(),
+           this->s_time_source_.c_str());
+}
+
+bool PanelUI::set_setting(const std::string &group, const std::string &key, const std::string &value) {
+  std::string data = this->read_settings();
+  if (data.empty())
+    data = "{}";
+
+  // Читаем, правим одно поле, пишем обратно. Файл маленький, так что
+  // перезапись целиком проще и надёжнее точечного редактирования.
+  JsonDocument doc;
+  if (deserializeJson(doc, data) != DeserializationError::Ok)
+    doc.clear();
+
+  JsonObject grp = doc[group].isNull() ? doc[group].to<JsonObject>() : doc[group].as<JsonObject>();
+
+  // Число или строка — решаем по содержимому, чтобы в файле не заводились
+  // числа в кавычках.
+  char *end = nullptr;
+  const long num = strtol(value.c_str(), &end, 10);
+  if (end != value.c_str() && end != nullptr && *end == 0) {
+    grp[key] = num;
+  } else if (value == "true" || value == "false") {
+    grp[key] = (value == "true");
+  } else {
+    grp[key] = value;
+  }
+
+  std::string out;
+  serializeJson(doc, out);
+  return this->write_settings(out);
 }
 
 // ---------------------------------------------------------------------------

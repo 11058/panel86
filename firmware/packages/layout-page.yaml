@@ -60,13 +60,18 @@ lvgl:
                         align: CENTER
                         text_font: montserrat_20
                   on_click:
-                    - lvgl.page.show: page_wifi_list
+                    - lvgl.page.show: page_settings
         - obj:
             id: ui_root
             x: 0
             y: 44
             width: 720
             height: 676
+            # Тёмный фон задаётся и здесь, а не только из кода: пустой
+            # контейнер (интерпретатор ещё не отработал) иначе светится
+            # белым и выглядит как поломка.
+            bg_color: 0x0B0F13
+            bg_opa: COVER
             scrollable: false
             pad_all: 0
             border_width: 0

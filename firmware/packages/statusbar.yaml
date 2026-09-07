@@ -72,3 +72,84 @@ interval:
           }
           lv_obj_set_style_image_recolor(id(sb_ha), lv_color_hex(hc), LV_PART_MAIN);
           lv_obj_set_style_image_recolor_opa(id(sb_ha), LV_OPA_COVER, LV_PART_MAIN);
+
+  # Живое наполнение страниц настроек и засыпание экрана.
+  - interval: 2s
+    then:
+      - lambda: |-
+          // --- Состояние сети ---
+          char buf[420];
+          const bool w = wifi::global_wifi_component->is_connected();
+          auto ips = wifi::global_wifi_component->wifi_sta_ip_addresses();
+          char ipbuf[48] = "—";
+          if (w && !ips.empty())
+            ips[0].str_to(ipbuf);
+          const char *ip = ipbuf;
+          std::string ssid = w ? wifi::global_wifi_component->wifi_ssid() : std::string("—");
+          snprintf(buf, sizeof(buf),
+                   "Интерфейс:  %s\n"
+                   "Адрес:      %s\n"
+                   "Сеть:       %s\n"
+                   "Сигнал:     %d dBm\n"
+                   "MAC:        %s\n"
+                   "\n"
+                   "Ethernet:   кабель не подключён\n"
+                   "Home Assistant: %s",
+                   w ? "Wi-Fi" : "нет связи",
+                   ip, ssid.c_str(),
+                   w ? (int) wifi::global_wifi_component->wifi_rssi() : 0,
+                   get_mac_address_pretty().c_str(),
+                   api::global_api_server->is_connected()
+                     ? (api::global_api_server->is_connected_with_state_subscription()
+                          ? "подключён, данные идут" : "подключён, данные ещё не идут")
+                     : "нет связи");
+          lv_label_set_text(id(lbl_netinfo), buf);
+          lv_label_set_text(id(lbl_net_wifi), w ? ssid.c_str() : "не подключено");
+          lv_label_set_text(id(lbl_net_eth), "кабель не подключён");
+
+          // --- О панели ---
+          char ab[320];
+          snprintf(ab, sizeof(ab),
+                   "Прошивка:   %s\n"
+                   "ESPHome:    " ESPHOME_VERSION "\n"
+                   "Работает:   %u мин\n"
+                   "Куча:       %u КиБ\n"
+                   "PSRAM:      %u КиБ\n"
+                   "Раскладка:  %u карточек",
+                   App.get_name().c_str(),
+                   (unsigned) (millis() / 60000),
+                   (unsigned) (esp_get_free_heap_size() / 1024),
+                   (unsigned) (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024),
+                   (unsigned) id(panel_storage)->card_count());
+          lv_label_set_text(id(lbl_about), ab);
+
+          // --- Текущее время на странице «Время» ---
+          auto t = id(sntp_time).now();
+          if (t.is_valid()) {
+            char tb[48];
+            snprintf(tb, sizeof(tb), "%02d:%02d:%02d, %02d.%02d.%04d",
+                     t.hour, t.minute, t.second, t.day_of_month, t.month, t.year);
+            lv_label_set_text(id(lbl_time_now), tb);
+          } else {
+            lv_label_set_text(id(lbl_time_now), "время не синхронизировано");
+          }
+          lv_label_set_text(id(lbl_time_src),
+                            id(panel_storage)->time_source() == "sntp" ? "интернет" : "Home Assistant");
+
+  # Засыпание экрана: гасим подсветку после простоя, будим касанием.
+  # Простой считает сам LVGL, отдельного трекинга не нужно.
+  - interval: 1s
+    then:
+      - lambda: |-
+          const uint32_t after = id(panel_storage)->sleep_after_ms();
+          if (after == 0) return;                       // «никогда»
+          static bool dimmed = false;
+          const uint32_t idle = lv_display_get_inactive_time(nullptr);
+          const bool should = idle > after;
+          if (should == dimmed) return;
+          dimmed = should;
+          auto call = id(backlight).turn_on();
+          call.set_brightness((should ? id(panel_storage)->sleep_brightness()
+                                      : id(panel_storage)->brightness()) / 100.0f);
+          call.set_transition_length(should ? 1200 : 200);
+          call.perform();

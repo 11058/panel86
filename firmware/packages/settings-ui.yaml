@@ -1,0 +1,499 @@
+# ---------------------------------------------------------------------------
+# Настройки на самой панели.
+#
+# Структура:
+#   Настройки -> Экран      яркость, тема, засыпание, датчик движения
+#             -> Сеть       Wi-Fi (готово), Ethernet, Состояние
+#             -> Время      источник, сервер, часовой пояс
+#             -> О панели   версия, аптайм, память, температура
+#
+# Все значения лежат в settings.json на LittleFS, а не в globals
+# с restore_value: ключи хранения ESPHome привязаны к хешу конфига
+# и обнуляются при обновлении прошивки (ADR-0004).
+# ---------------------------------------------------------------------------
+
+lvgl:
+  pages:
+    # --- Меню настроек ---
+    - id: page_settings
+      widgets:
+        - label:
+            text: "Настройки"
+            align: TOP_MID
+            y: 22
+            text_font: f_title
+            text_color: 0xE3E9EE
+        - button:
+            align: TOP_LEFT
+            x: 20
+            y: 18
+            width: 130
+            height: 50
+            bg_color: 0x222B33
+            widgets:
+              - label:
+                  text: "Назад"
+                  align: CENTER
+                  text_color: 0xE3E9EE
+            on_click:
+              - lvgl.page.show: page_layout
+
+        - button:
+            align: TOP_MID
+            y: 90
+            width: 620
+            height: 84
+            bg_color: 0x161C22
+            widgets:
+              - label:
+                  text: "Экран"
+                  align: LEFT_MID
+                  x: 20
+                  text_font: f_body
+                  text_color: 0xE3E9EE
+              - label:
+                  text: "яркость, тема, засыпание"
+                  align: RIGHT_MID
+                  x: -20
+                  text_font: f_small
+                  text_color: 0x6B7B88
+            on_click:
+              - lvgl.page.show: page_display
+
+        - button:
+            align: TOP_MID
+            y: 186
+            width: 620
+            height: 84
+            bg_color: 0x161C22
+            widgets:
+              - label:
+                  text: "Сеть"
+                  align: LEFT_MID
+                  x: 20
+                  text_font: f_body
+                  text_color: 0xE3E9EE
+              - label:
+                  text: "Wi-Fi, Ethernet, состояние"
+                  align: RIGHT_MID
+                  x: -20
+                  text_font: f_small
+                  text_color: 0x6B7B88
+            on_click:
+              - lvgl.page.show: page_network
+
+        - button:
+            align: TOP_MID
+            y: 282
+            width: 620
+            height: 84
+            bg_color: 0x161C22
+            widgets:
+              - label:
+                  text: "Время"
+                  align: LEFT_MID
+                  x: 20
+                  text_font: f_body
+                  text_color: 0xE3E9EE
+              - label:
+                  id: lbl_time_src
+                  text: "—"
+                  align: RIGHT_MID
+                  x: -20
+                  text_font: f_small
+                  text_color: 0x6B7B88
+            on_click:
+              - lvgl.page.show: page_time
+
+        - button:
+            align: TOP_MID
+            y: 378
+            width: 620
+            height: 84
+            bg_color: 0x161C22
+            widgets:
+              - label:
+                  text: "О панели"
+                  align: LEFT_MID
+                  x: 20
+                  text_font: f_body
+                  text_color: 0xE3E9EE
+            on_click:
+              - lvgl.page.show: page_about
+
+    # --- Экран ---
+    - id: page_display
+      widgets:
+        - label:
+            text: "Экран"
+            align: TOP_MID
+            y: 22
+            text_font: f_title
+            text_color: 0xE3E9EE
+        - button:
+            align: TOP_LEFT
+            x: 20
+            y: 18
+            width: 130
+            height: 50
+            bg_color: 0x222B33
+            widgets:
+              - label:
+                  text: "Назад"
+                  align: CENTER
+                  text_color: 0xE3E9EE
+            on_click:
+              - lvgl.page.show: page_settings
+
+        - label:
+            text: "Яркость"
+            align: TOP_LEFT
+            x: 40
+            y: 100
+            text_font: f_body
+            text_color: 0x9AA8B4
+        - label:
+            id: lbl_bright
+            text: "80 %"
+            align: TOP_RIGHT
+            x: -40
+            y: 100
+            text_font: f_body
+            text_color: 0xE9A45C
+        - slider:
+            id: sld_bright
+            align: TOP_MID
+            y: 140
+            width: 620
+            height: 26
+            min_value: 10
+            max_value: 100
+            value: 80
+            on_value:
+              - lambda: |-
+                  int v = (int) x;
+                  lv_label_set_text_fmt(id(lbl_bright), "%d %%", v);
+                  // Применяем сразу: настройка яркости должна быть видна
+                  // в момент движения ползунка, а не после сохранения.
+                  auto call = id(backlight).turn_on();
+                  call.set_brightness(v / 100.0f);
+                  call.perform();
+            on_release:
+              - lambda: |-
+                  id(panel_storage)->set_setting("display", "brightness",
+                                                 std::to_string((int) lv_slider_get_value(id(sld_bright))));
+
+        - label:
+            text: "Гаснуть через"
+            align: TOP_LEFT
+            x: 40
+            y: 210
+            text_font: f_body
+            text_color: 0x9AA8B4
+        - label:
+            id: lbl_sleep
+            text: "1 мин"
+            align: TOP_RIGHT
+            x: -40
+            y: 210
+            text_font: f_body
+            text_color: 0xE9A45C
+        - slider:
+            id: sld_sleep
+            align: TOP_MID
+            y: 250
+            width: 620
+            height: 26
+            min_value: 0
+            max_value: 6
+            value: 2
+            on_value:
+              - lambda: |-
+                  static const char *const NAMES[] = {"никогда","30 с","1 мин","2 мин","5 мин","10 мин","30 мин"};
+                  int i = (int) x; if (i < 0) i = 0; if (i > 6) i = 6;
+                  lv_label_set_text(id(lbl_sleep), NAMES[i]);
+            on_release:
+              - lambda: |-
+                  static const char *const VALS[] = {"0s","30s","60s","120s","300s","600s","1800s"};
+                  int i = (int) lv_slider_get_value(id(sld_sleep));
+                  if (i < 0) i = 0; if (i > 6) i = 6;
+                  id(panel_storage)->set_setting("display", "sleep_after", VALS[i]);
+
+        - label:
+            text: "Яркость в спящем режиме"
+            align: TOP_LEFT
+            x: 40
+            y: 320
+            text_font: f_small
+            text_color: 0x9AA8B4
+        - label:
+            id: lbl_dim
+            text: "10 %"
+            align: TOP_RIGHT
+            x: -40
+            y: 318
+            text_font: f_body
+            text_color: 0xE9A45C
+        - slider:
+            id: sld_dim
+            align: TOP_MID
+            y: 352
+            width: 620
+            height: 26
+            min_value: 0
+            max_value: 60
+            value: 10
+            on_value:
+              - lambda: 'lv_label_set_text_fmt(id(lbl_dim), "%d %%", (int) x);'
+            on_release:
+              - lambda: |-
+                  id(panel_storage)->set_setting("display", "sleep_brightness",
+                                                 std::to_string((int) lv_slider_get_value(id(sld_dim))));
+
+        - label:
+            text: "Будить датчиком движения"
+            align: TOP_LEFT
+            x: 40
+            y: 420
+            text_font: f_small
+            text_color: 0x9AA8B4
+        - label:
+            text: "датчик пока не подключён"
+            align: TOP_LEFT
+            x: 40
+            y: 448
+            text_font: f_small
+            text_color: 0x6B7B88
+        - switch:
+            id: sw_motion
+            align: TOP_RIGHT
+            x: -40
+            y: 420
+            on_value:
+              - lambda: |-
+                  id(panel_storage)->set_setting("display", "wake_on_motion", x ? "true" : "false");
+
+        - label:
+            text: "Тема"
+            align: TOP_LEFT
+            x: 40
+            y: 500
+            text_font: f_body
+            text_color: 0x9AA8B4
+        - dropdown:
+            id: dd_theme
+            align: TOP_RIGHT
+            x: -40
+            y: 496
+            width: 260
+            options:
+              - "Тёмная"
+              - "Светлая"
+            on_value:
+              - lambda: |-
+                  id(panel_storage)->set_setting("display", "theme",
+                                                 lv_dropdown_get_selected(id(dd_theme)->obj) == 0 ? "dark" : "light");
+
+    # --- Сеть: меню ---
+    - id: page_network
+      widgets:
+        - label:
+            text: "Сеть"
+            align: TOP_MID
+            y: 22
+            text_font: f_title
+            text_color: 0xE3E9EE
+        - button:
+            align: TOP_LEFT
+            x: 20
+            y: 18
+            width: 130
+            height: 50
+            bg_color: 0x222B33
+            widgets:
+              - label: { text: "Назад", align: CENTER, text_color: 0xE3E9EE }
+            on_click:
+              - lvgl.page.show: page_settings
+        - button:
+            align: TOP_MID
+            y: 90
+            width: 620
+            height: 84
+            bg_color: 0x161C22
+            widgets:
+              - label: { text: "Wi-Fi", align: LEFT_MID, x: 20, text_font: f_body, text_color: 0xE3E9EE }
+              - label: { id: lbl_net_wifi, text: "—", align: RIGHT_MID, x: -20, text_font: f_small, text_color: 0x6B7B88 }
+            on_click:
+              - lvgl.page.show: page_wifi_list
+        - button:
+            align: TOP_MID
+            y: 186
+            width: 620
+            height: 84
+            bg_color: 0x161C22
+            widgets:
+              - label: { text: "Ethernet", align: LEFT_MID, x: 20, text_font: f_body, text_color: 0xE3E9EE }
+              - label: { id: lbl_net_eth, text: "—", align: RIGHT_MID, x: -20, text_font: f_small, text_color: 0x6B7B88 }
+            on_click:
+              - lvgl.page.show: page_netstat
+        - button:
+            align: TOP_MID
+            y: 282
+            width: 620
+            height: 84
+            bg_color: 0x161C22
+            widgets:
+              - label: { text: "Состояние", align: LEFT_MID, x: 20, text_font: f_body, text_color: 0xE3E9EE }
+              - label: { text: "текущие параметры", align: RIGHT_MID, x: -20, text_font: f_small, text_color: 0x6B7B88 }
+            on_click:
+              - lvgl.page.show: page_netstat
+
+    # --- Сеть: состояние ---
+    - id: page_netstat
+      widgets:
+        - label:
+            text: "Состояние сети"
+            align: TOP_MID
+            y: 22
+            text_font: f_title
+            text_color: 0xE3E9EE
+        - button:
+            align: TOP_LEFT
+            x: 20
+            y: 18
+            width: 130
+            height: 50
+            bg_color: 0x222B33
+            widgets:
+              - label: { text: "Назад", align: CENTER, text_color: 0xE3E9EE }
+            on_click:
+              - lvgl.page.show: page_network
+        - label:
+            id: lbl_netinfo
+            text: "—"
+            align: TOP_LEFT
+            x: 40
+            y: 92
+            text_font: f_small
+            text_color: 0xE3E9EE
+
+    # --- Время ---
+    - id: page_time
+      widgets:
+        - label:
+            text: "Время"
+            align: TOP_MID
+            y: 22
+            text_font: f_title
+            text_color: 0xE3E9EE
+        - button:
+            align: TOP_LEFT
+            x: 20
+            y: 18
+            width: 130
+            height: 50
+            bg_color: 0x222B33
+            widgets:
+              - label: { text: "Назад", align: CENTER, text_color: 0xE3E9EE }
+            on_click:
+              - lvgl.page.show: page_settings
+
+        - label: { text: "Источник", align: TOP_LEFT, x: 40, y: 110, text_font: f_body, text_color: 0x9AA8B4 }
+        - dropdown:
+            id: dd_time_src
+            align: TOP_RIGHT
+            x: -40
+            y: 106
+            width: 300
+            options:
+              - "Интернет (NTP)"
+              - "Home Assistant"
+            on_value:
+              - lambda: |-
+                  id(panel_storage)->set_setting("time", "source",
+                      lv_dropdown_get_selected(id(dd_time_src)->obj) == 0 ? "sntp" : "homeassistant");
+
+        - label: { text: "Сервер NTP", align: TOP_LEFT, x: 40, y: 190, text_font: f_body, text_color: 0x9AA8B4 }
+        - dropdown:
+            id: dd_ntp
+            align: TOP_RIGHT
+            x: -40
+            y: 186
+            width: 300
+            # Список, а не поле ввода: вторая LVGL-клавиатура в прошивке
+            # приводила к зависанию loopTask (см. docs/01-p0-bringup.md),
+            # да и набирать адрес пальцем на стене — сомнительное удовольствие.
+            options:
+              - "pool.ntp.org"
+              - "ru.pool.ntp.org"
+              - "time.cloudflare.com"
+              - "time.google.com"
+            on_value:
+              - lambda: |-
+                  static const char *const S[] = {"pool.ntp.org","ru.pool.ntp.org",
+                                                  "time.cloudflare.com","time.google.com"};
+                  int i = (int) lv_dropdown_get_selected(id(dd_ntp)->obj);
+                  if (i < 0 || i > 3) i = 0;
+                  id(panel_storage)->set_setting("time", "server", S[i]);
+                  // Смена сервера применяется при следующей загрузке:
+                  // менять его на лету ESPHome не позволяет, а лезть
+                  // в esp_sntp мимо компонента — напрашиваться на гонку.
+                  ESP_LOGI("settings", "сервер NTP: %s (применится после перезагрузки)", S[i]);
+
+        - label: { text: "Часовой пояс", align: TOP_LEFT, x: 40, y: 270, text_font: f_body, text_color: 0x9AA8B4 }
+        - dropdown:
+            id: dd_tz
+            align: TOP_RIGHT
+            x: -40
+            y: 266
+            width: 300
+            options:
+              - "Екатеринбург"
+              - "Москва"
+              - "Новосибирск"
+              - "Владивосток"
+            on_value:
+              - lambda: |-
+                  static const char *const TZ[] = {"Asia/Yekaterinburg","Europe/Moscow",
+                                                   "Asia/Novosibirsk","Asia/Vladivostok"};
+                  int i = (int) lv_dropdown_get_selected(id(dd_tz)->obj);
+                  if (i < 0 || i > 3) i = 0;
+                  id(panel_storage)->set_setting("time", "timezone", TZ[i]);
+                  id(sntp_time).set_timezone(TZ[i]);
+
+        - label:
+            id: lbl_time_now
+            text: "—"
+            align: TOP_MID
+            y: 360
+            text_font: f_body
+            text_color: 0xE9A45C
+
+    # --- О панели ---
+    - id: page_about
+      widgets:
+        - label:
+            text: "О панели"
+            align: TOP_MID
+            y: 22
+            text_font: f_title
+            text_color: 0xE3E9EE
+        - button:
+            align: TOP_LEFT
+            x: 20
+            y: 18
+            width: 130
+            height: 50
+            bg_color: 0x222B33
+            widgets:
+              - label: { text: "Назад", align: CENTER, text_color: 0xE3E9EE }
+            on_click:
+              - lvgl.page.show: page_settings
+        - label:
+            id: lbl_about
+            text: "—"
+            align: TOP_LEFT
+            x: 40
+            y: 92
+            text_font: f_small
+            text_color: 0xE3E9EE
