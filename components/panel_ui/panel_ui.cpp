@@ -1348,6 +1348,28 @@ void PanelUI::render_page_(void *tile, const void *page_json, int w, int h) {
     if (card->span_w > cols) card->span_w = cols;
     if (card->span_h > rows) card->span_h = rows;
 
+    for (JsonObject jr : jc["popup"].as<JsonArray>()) {
+      PopupRow pr;
+      pr.kind = std::string(jr["kind"] | "text");
+      pr.label = std::string(jr["label"] | "");
+      pr.service = std::string(jr["service"] | "");
+      pr.key = std::string(jr["key"] | "");
+      pr.lo = jr["min"] | 0;
+      pr.hi = jr["max"] | 100;
+      pr.step = jr["step"] | 1;
+      for (JsonObject jbb : jr["buttons"].as<JsonArray>()) {
+        SubButton sb2;
+        sb2.icon = std::string(jbb["icon"] | "");
+        sb2.service = std::string(jbb["service"] | "");
+        sb2.key = std::string(jbb["key"] | "");
+        sb2.value = std::string(jbb["value"] | "");
+        sb2.label = std::string(jbb["label"] | "");
+        if (!sb2.service.empty())
+          pr.buttons.push_back(sb2);
+      }
+      card->popup.push_back(pr);
+    }
+
     JsonObject jt = jc["template"].as<JsonObject>();
     if (!jt.isNull()) {
       card->tpl_label = std::string(jt["label"] | "");
@@ -1871,6 +1893,69 @@ static void sheet_slider_cb(lv_event_t *e) {
 void PanelUI::build_details_controls(void *sheet_v, Card *card, int width) {
   auto *sheet = static_cast<lv_obj_t *>(sheet_v);
   const int Y0 = 120;
+
+  // Своё содержимое всплывашки, если задано в раскладке. Набор по типу
+  // карточки остаётся умолчанием: он покрывает обычные случаи, а описывать
+  // руками каждое окно ради выключателя никто не станет.
+  if (!card->popup.empty()) {
+    int y = Y0;
+    for (const auto &pr : card->popup) {
+      if (!pr.label.empty()) {
+        lv_obj_t *cp = lv_label_create(sheet);
+        lv_label_set_text(cp, pr.label.c_str());
+        lv_obj_set_pos(cp, 0, y);
+        lv_obj_set_style_text_color(cp, lv_color_hex(card_ink2()), LV_PART_MAIN);
+        if (this->font_small_ != nullptr)
+          lv_obj_set_style_text_font(cp, static_cast<const lv_font_t *>(this->font_small_),
+                                     LV_PART_MAIN);
+        y += 34;
+      }
+
+      if (pr.kind == "slider") {
+        lv_obj_t *sl = lv_slider_create(sheet);
+        lv_obj_set_size(sl, width, 46);
+        lv_obj_set_pos(sl, 0, y);
+        lv_slider_set_range(sl, pr.lo, pr.hi);
+        lv_slider_set_value(sl, (pr.lo + pr.hi) / 2, LV_ANIM_OFF);
+        lv_obj_set_style_radius(sl, 23, LV_PART_MAIN);
+        lv_obj_set_style_radius(sl, 23, LV_PART_INDICATOR);
+        lv_obj_set_style_bg_color(sl, accent_for(card->type), LV_PART_INDICATOR);
+        auto *a = new SheetAction{this, pr.service, pr.key, ""};  // NOLINT
+        a->card = card;
+        lv_obj_add_event_cb(sl, sheet_slider_cb, LV_EVENT_RELEASED, a);
+        lv_obj_add_event_cb(sl, sheet_action_free_cb, LV_EVENT_DELETE, a);
+        y += 70;
+
+      } else if (pr.kind == "pill") {
+        this->build_step_pill(sheet, card, 0, y, width, 88, pr.service, pr.key, pr.lo, pr.hi,
+                              pr.step);
+        y += 108;
+
+      } else if (pr.kind == "buttons" && !pr.buttons.empty()) {
+        const int n = static_cast<int>(pr.buttons.size());
+        const int bw = (width - 16 * (n - 1)) / n;
+        for (int i = 0; i < n; i++) {
+          const auto &b = pr.buttons[i];
+          std::string svc = b.service;
+          const size_t ph = svc.find("{domain}");
+          if (ph != std::string::npos)
+            svc.replace(ph, 8, card->entity.substr(0, card->entity.find('.')));
+          sheet_button(sheet, this, b.label.empty() ? b.icon.c_str() : b.label.c_str(),
+                       i * (bw + 16), y, bw, 78, svc, b.key.empty() ? nullptr : b.key.c_str(),
+                       b.value, this->font_value_);
+        }
+        y += 96;
+
+      } else {
+        y += 6;   // «text» — только подпись, она уже нарисована
+      }
+
+      if (y > 520)
+        break;    // дальше не помещается: окно 440 плюс шапка
+    }
+    return;
+  }
+
   const int BH = 78;
   const std::string dom = card->entity.substr(0, card->entity.find('.'));
   const lv_color_t acc = accent_for(card->type);

@@ -375,6 +375,20 @@
           как в Bubble Card.</p>
       </div>
 
+      <div id="popFields">
+        <label>Всплывающие подробности</label>
+        <div id="popList"></div>
+        <div class="row" style="margin-top:8px">
+          <button id="popAddPill">+ плюс-минус</button>
+          <button id="popAddSlider">+ ползунок</button>
+          <button id="popAddBtns">+ кнопки</button>
+          <button id="popAddText">+ подпись</button>
+        </div>
+        <p class="hint">Если ничего не задать, окно соберётся само по типу
+          карточки — для света яркость, для шторы вверх-стоп-вниз и так
+          далее. Здесь можно собрать своё.</p>
+      </div>
+
       <div id="tplFields">
         <label>Шаблоны Home Assistant</label>
         <input id="cTplLabel" class="mono" style="width:100%" placeholder="подпись: {{ states('sensor.x') }}">
@@ -661,6 +675,7 @@ function render(){
     $("lightFields").style.display = c.type === "light" ? "block" : "none";
     $("rowFields").style.display = c.type === "buttons" ? "block" : "none";
     if (c.type === "buttons") renderRowButtons(c);
+    renderPopup(c);
     c.template ||= {};
     $("cTplLabel").value = c.template.label || "";
     $("cTplState").value = c.template.state || "";
@@ -792,6 +807,94 @@ function renderSubButtons(c){
     }
   });
 }
+function renderPopup(c){
+  c.popup ||= [];
+  const box = $("popList");
+  box.innerHTML = "";
+  const KINDS = {pill:"плюс-минус", slider:"ползунок", buttons:"кнопки", text:"подпись"};
+
+  c.popup.forEach((r, i) => {
+    const wrap = document.createElement("div");
+    wrap.style.cssText = "border:1px solid var(--rule);border-radius:8px;padding:10px;margin-top:8px";
+
+    const head = document.createElement("div");
+    head.className = "row";
+    head.innerHTML = `<b style="flex:1;font-size:13px">${KINDS[r.kind]||r.kind}</b>` +
+                     `<button>↑</button><button>↓</button><button class="danger">×</button>`;
+    const [, up, down, del] = head.children;
+    up.onclick   = () => { if(i>0){ c.popup.splice(i-1,0,c.popup.splice(i,1)[0]); render(); } };
+    down.onclick = () => { if(i<c.popup.length-1){ c.popup.splice(i+1,0,c.popup.splice(i,1)[0]); render(); } };
+    del.onclick  = () => { c.popup.splice(i,1); render(); };
+    wrap.append(head);
+
+    const lab = document.createElement("input");
+    lab.style.cssText = "width:100%;margin-top:6px";
+    lab.placeholder = "подпись строки";
+    lab.value = r.label || "";
+    lab.oninput = e => { r.label = e.target.value; };
+    wrap.append(lab);
+
+    if (r.kind === "pill" || r.kind === "slider"){
+      const line = document.createElement("div");
+      line.className = "row";
+      line.style.marginTop = "6px";
+      line.innerHTML =
+        `<input class="mono" style="flex:2" placeholder="light.turn_on" value="${esc(r.service||"")}">` +
+        `<input class="mono" style="flex:1" placeholder="параметр" value="${esc(r.key||"")}">`;
+      const [srv, key] = line.children;
+      srv.oninput = e => { r.service = e.target.value.trim(); };
+      key.oninput = e => { r.key = e.target.value.trim(); };
+      wrap.append(line);
+
+      const rng = document.createElement("div");
+      rng.className = "row";
+      rng.style.marginTop = "6px";
+      rng.innerHTML =
+        `<input type="number" placeholder="от" value="${r.min ?? 0}" style="width:90px">` +
+        `<input type="number" placeholder="до" value="${r.max ?? 100}" style="width:90px">` +
+        (r.kind === "pill" ? `<input type="number" placeholder="шаг" value="${r.step ?? 1}" style="width:90px">` : "");
+      rng.children[0].oninput = e => { r.min = +e.target.value; };
+      rng.children[1].oninput = e => { r.max = +e.target.value; };
+      if (r.kind === "pill") rng.children[2].oninput = e => { r.step = +e.target.value; };
+      wrap.append(rng);
+    }
+
+    if (r.kind === "buttons"){
+      r.buttons ||= [];
+      r.buttons.forEach((b, k) => {
+        const bl = document.createElement("div");
+        bl.className = "row";
+        bl.style.marginTop = "6px";
+        bl.innerHTML =
+          `<input style="flex:1" placeholder="подпись" value="${esc(b.label||"")}">` +
+          `<input class="mono" style="flex:2" placeholder="{domain}.turn_on" value="${esc(b.service||"")}">` +
+          `<button class="danger">×</button>`;
+        const [lb, sv, dl] = bl.children;
+        lb.oninput = e => { b.label = e.target.value; };
+        sv.oninput = e => { b.service = e.target.value.trim(); };
+        dl.onclick = () => { r.buttons.splice(k,1); render(); };
+        wrap.append(bl);
+      });
+      const add = document.createElement("button");
+      add.textContent = "+ кнопка";
+      add.style.marginTop = "6px";
+      add.onclick = () => { r.buttons.push({label:"",service:"{domain}.turn_on"}); render(); };
+      wrap.append(add);
+    }
+
+    box.append(wrap);
+  });
+}
+function popAdd(kind){
+  const c = cur();
+  (c.popup ||= []).push(kind === "buttons" ? {kind, label:"", buttons:[]} : {kind, label:""});
+  render();
+}
+$("popAddPill").onclick   = () => popAdd("pill");
+$("popAddSlider").onclick = () => popAdd("slider");
+$("popAddBtns").onclick   = () => popAdd("buttons");
+$("popAddText").onclick   = () => popAdd("text");
+
 function tplSet(field, v){
   const c = cur();
   c.template ||= {};

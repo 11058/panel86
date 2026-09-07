@@ -130,6 +130,20 @@ class PanelUI : public Component {
     std::string service;   // что вызвать, например cover.open_cover
     std::string key;       // необязательный параметр
     std::string value;
+    std::string label;     // подпись — нужна кнопкам во всплывашке
+  };
+
+  /// Одна строка во всплывающих подробностях. Позволяет собрать окно
+  /// из чего угодно, а не только из набора, заданного типом карточки.
+  struct PopupRow {
+    std::string kind;      // slider | pill | buttons | text
+    std::string label;
+    std::string service;
+    std::string key;
+    int lo{0};
+    int hi{100};
+    int step{1};
+    std::vector<SubButton> buttons;
   };
 
   struct Card {
@@ -175,6 +189,7 @@ class PanelUI : public Component {
     std::string tpl_label;
     std::string tpl_state;
     std::string tpl_icon;
+    std::vector<PopupRow> popup;
     void *cam_slot{nullptr};   // online_image::OnlineImage *
     PanelUI *owner{nullptr};
 

@@ -303,6 +303,14 @@
               "description": "Должен вернуть имя иконки Material Design Icons."
             }
           }
+        },
+        "popup": {
+          "type": "array",
+          "maxItems": 6,
+          "description": "Содержимое всплывающих подробностей. Если не задано, окно собирается по типу карточки: описывать руками каждое окно ради выключателя никто не станет.",
+          "items": {
+            "$ref": "#/$defs/popup_row"
+          }
         }
       },
       "allOf": [
@@ -458,6 +466,66 @@
           }
         }
       ]
+    },
+    "popup_row": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "pill",
+            "slider",
+            "buttons",
+            "text"
+          ],
+          "description": "pill — плюс-минус со значением; slider — ползунок; buttons — ряд кнопок; text — только подпись."
+        },
+        "label": {
+          "type": "string"
+        },
+        "service": {
+          "type": "string",
+          "description": "Можно писать {domain} — подставится домен сущности карточки."
+        },
+        "key": {
+          "type": "string"
+        },
+        "min": {
+          "type": "integer"
+        },
+        "max": {
+          "type": "integer"
+        },
+        "step": {
+          "type": "integer"
+        },
+        "buttons": {
+          "type": "array",
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "required": [
+              "service"
+            ],
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "service": {
+                "type": "string"
+              },
+              "key": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
     }
   }
 }
