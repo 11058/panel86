@@ -37,6 +37,28 @@ script:
       - lambda: |-
           const bool dark = id(panel_storage)->theme() != "light";
           const uint32_t CARD = dark ? 0x161C22 : 0xFFFFFF;
+          const uint32_t BG   = dark ? 0x0B0F13 : 0xF2F4F6;
+
+          // Красим ВСЕ страницы сразу при загрузке. Полагаться только
+          // на on_load нельзя: он срабатывает, когда страница уже
+          // отрисована, и первый показ выходит белым.
+          // Список генерируется tools/gen_page_list.py, чтобы не отставать
+          // от конфигов при добавлении новых страниц.
+          // НАЧАЛО СПИСКА СТРАНИЦ (генерируется tools/gen_page_list.py)
+          lv_obj_t *const pages[] = {
+            id(page_p0)->obj, id(page_layout)->obj, id(page_settings)->obj,
+            id(page_display)->obj, id(page_schedule)->obj, id(page_network)->obj,
+            id(page_netstat)->obj, id(page_time)->obj, id(page_about)->obj,
+            id(page_wifi_list)->obj, id(page_wifi_pass)->obj,
+          };
+          // КОНЕЦ СПИСКА СТРАНИЦ
+          for (lv_obj_t *pg : pages) {
+            if (pg == nullptr) continue;
+            lv_obj_set_style_bg_color(pg, lv_color_hex(BG), LV_PART_MAIN);
+            lv_obj_set_style_bg_opa(pg, LV_OPA_COVER, LV_PART_MAIN);
+            lv_obj_set_style_text_color(pg, lv_color_hex(dark ? 0xE3E9EE : 0x141C24), LV_PART_MAIN);
+          }
+
           const uint32_t INK  = dark ? 0xE3E9EE : 0x141C24;
           const uint32_t INK2 = dark ? 0x9AA8B4 : 0x4E5D6B;
 
