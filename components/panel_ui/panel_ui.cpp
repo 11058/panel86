@@ -186,6 +186,8 @@ void PanelUI::render_card_(void *parent, Card *card, int x, int y, int w, int h)
   lv_obj_set_style_border_width(box, 2, LV_PART_MAIN);
   lv_obj_set_style_border_color(box, accent, LV_PART_MAIN);
   lv_obj_set_style_pad_all(box, 14, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(box, lv_color_hex(0x161C22), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(box, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
 
   // Название — приглушённое, сверху.
@@ -194,6 +196,7 @@ void PanelUI::render_card_(void *parent, Card *card, int x, int y, int w, int h)
   lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
   lv_obj_set_width(name, w - 32);
   lv_obj_align(name, LV_ALIGN_TOP_LEFT, 0, 0);
+  lv_obj_set_style_text_color(name, lv_color_hex(0x9AA8B4), LV_PART_MAIN);
   if (this->font_small_ != nullptr)
     lv_obj_set_style_text_font(name, static_cast<const lv_font_t *>(this->font_small_), LV_PART_MAIN);
 
@@ -209,6 +212,7 @@ void PanelUI::render_card_(void *parent, Card *card, int x, int y, int w, int h)
   lv_obj_t *sub = lv_label_create(box);
   lv_label_set_text(sub, "");
   lv_obj_align(sub, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+  lv_obj_set_style_text_color(sub, lv_color_hex(0x6B7B88), LV_PART_MAIN);
   if (this->font_small_ != nullptr)
     lv_obj_set_style_text_font(sub, static_cast<const lv_font_t *>(this->font_small_), LV_PART_MAIN);
 
@@ -282,8 +286,8 @@ void PanelUI::apply_state_(Card *card, const std::string &state) {
   // а не по мелкой надписи.
   if (box != nullptr) {
     const bool active = (state == "on" || state == "open" || state == "heat");
-    lv_obj_set_style_bg_color(box, active ? accent_for(card->type) : lv_color_hex(0x101519), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(box, active ? LV_OPA_20 : LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(box, active ? accent_for(card->type) : lv_color_hex(0x161C22), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(box, active ? LV_OPA_30 : LV_OPA_COVER, LV_PART_MAIN);
   }
 
   // Пороги: выход за границу окрашивает значение тревожным цветом.
@@ -363,6 +367,7 @@ void PanelUI::render_page_(void *tile, const void *page_json, int w, int h) {
     lv_obj_t *hdr = lv_label_create(par);
     lv_label_set_text(hdr, title);
     lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, 8);
+    lv_obj_set_style_text_color(hdr, lv_color_hex(0xE3E9EE), LV_PART_MAIN);
     if (this->font_title_ != nullptr)
       lv_obj_set_style_text_font(hdr, static_cast<const lv_font_t *>(this->font_title_), LV_PART_MAIN);
   }
@@ -416,8 +421,23 @@ bool PanelUI::build_ui(void *root) {
   auto *par = static_cast<lv_obj_t *>(root);
   lv_obj_clean(par);
 
-  const int rw = lv_obj_get_width(par);
-  const int rh = lv_obj_get_height(par);
+  // Размеры надо запрашивать ПОСЛЕ пересчёта раскладки: на on_boot LVGL
+  // ещё не считал геометрию, и get_width вернёт 0. Тогда карточки выходят
+  // нулевого размера, и на экране остаётся только фон контейнера — белый.
+  lv_obj_update_layout(par);
+  int rw = lv_obj_get_width(par);
+  int rh = lv_obj_get_height(par);
+  if (rw <= 1 || rh <= 1) {
+    lv_display_t *disp = lv_display_get_default();
+    rw = disp != nullptr ? lv_display_get_horizontal_resolution(disp) : 720;
+    rh = disp != nullptr ? lv_display_get_vertical_resolution(disp) : 720;
+    ESP_LOGW(TAG, "размер контейнера не посчитан, беру разрешение экрана: %dx%d", rw, rh);
+  }
+  ESP_LOGI(TAG, "рисую в области %dx%d", rw, rh);
+
+  // Свой фон: у lv_obj по умолчанию светлая заливка, и на ней ничего не видно.
+  lv_obj_set_style_bg_color(par, lv_color_hex(0x0B0F13), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(par, LV_OPA_COVER, LV_PART_MAIN);
 
   size_t n_pages = 0;
   bool ok = json::parse_json(data, [&](JsonObject doc) -> bool {
@@ -445,7 +465,8 @@ bool PanelUI::build_ui(void *root) {
     // Здесь достаточно обычного lv_obj, который уже есть всегда.
     lv_obj_t *scroller = lv_obj_create(par);
     lv_obj_set_size(scroller, rw, rh);
-    lv_obj_set_style_bg_opa(scroller, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(scroller, lv_color_hex(0x0B0F13), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(scroller, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(scroller, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(scroller, 0, LV_PART_MAIN);
     lv_obj_set_scroll_dir(scroller, LV_DIR_HOR);
@@ -459,7 +480,8 @@ bool PanelUI::build_ui(void *root) {
       lv_obj_set_size(tile, rw, rh);
       // Абсолютное позиционирование: LV_USE_FLEX в сборке ESPHome выключен.
       lv_obj_set_pos(tile, (int) n_pages * rw, 0);
-      lv_obj_set_style_bg_opa(tile, LV_OPA_TRANSP, LV_PART_MAIN);
+      lv_obj_set_style_bg_color(tile, lv_color_hex(0x0B0F13), LV_PART_MAIN);
+      lv_obj_set_style_bg_opa(tile, LV_OPA_COVER, LV_PART_MAIN);
       lv_obj_set_style_border_width(tile, 0, LV_PART_MAIN);
       lv_obj_set_style_pad_all(tile, 0, LV_PART_MAIN);
       lv_obj_clear_flag(tile, LV_OBJ_FLAG_SCROLLABLE);
